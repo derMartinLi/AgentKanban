@@ -36,8 +36,24 @@ export function ProjectSettings({ project, settings, onSave }: ProjectSettingsPr
     return <p className="empty-state">Select a concrete project to edit harness and guardrail settings.</p>;
   }
 
+  if (!project.isLinked) {
+    return <p className="empty-state">Link this repository before editing harness and guardrail settings.</p>;
+  }
+
   return (
     <div className="form-stack">
+      <div className="detail-block detail-block--wide">
+        <span className="detail-label">Linked repository</span>
+        <p>
+          {project.path} on {project.defaultBranch}
+        </p>
+      </div>
+
+      <div className="detail-block detail-block--wide">
+        <span className="detail-label">Remote origin</span>
+        <p>{project.remoteUrl ?? 'Origin verified during desktop registration.'}</p>
+      </div>
+
       <label className="field">
         <span>Resource files</span>
         <textarea

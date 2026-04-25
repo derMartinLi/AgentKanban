@@ -37,7 +37,7 @@ export function CreateTaskComposer({ availableCliTools, selectedProject, onCreat
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit = useMemo(
-    () => Boolean(selectedProject && description.trim() && cliCommand.trim()),
+    () => Boolean(selectedProject?.isLinked && description.trim() && cliCommand.trim()),
     [cliCommand, description, selectedProject],
   );
 
@@ -45,7 +45,11 @@ export function CreateTaskComposer({ availableCliTools, selectedProject, onCreat
     <section className="panel composer-panel">
       <div className="panel-heading">
         <p className="eyebrow">Dispatch</p>
-        <h2>Create Task</h2>
+        <h2>Launch Task</h2>
+        <p className="panel-copy">
+          Dispatch only against a linked repository. Agent Kanban branches from the selected base,
+          runs in a copied workspace, and keeps the source tree safe for review.
+        </p>
       </div>
 
       <div className="form-stack">
@@ -53,6 +57,21 @@ export function CreateTaskComposer({ availableCliTools, selectedProject, onCreat
           <span>Target project</span>
           <input readOnly value={selectedProject?.name ?? 'Select a concrete project'} />
         </label>
+
+        <div className="detail-grid detail-grid--compact">
+          <div className="detail-block">
+            <span className="detail-label">Repository path</span>
+            <p>{selectedProject?.path ?? 'Choose a linked repository from the sidebar.'}</p>
+          </div>
+          <div className="detail-block">
+            <span className="detail-label">Base branch</span>
+            <p>{selectedProject?.defaultBranch ?? 'main'}</p>
+          </div>
+          <div className="detail-block detail-block--wide">
+            <span className="detail-label">Remote origin</span>
+            <p>{selectedProject?.remoteUrl ?? 'Link this repository to verify an origin remote before dispatching tasks.'}</p>
+          </div>
+        </div>
 
         <label className="field">
           <span>Task description</span>
@@ -127,8 +146,13 @@ export function CreateTaskComposer({ availableCliTools, selectedProject, onCreat
           }}
           type="button"
         >
-          {submitting ? 'Dispatching...' : 'Dispatch Task'}
+          {submitting ? 'Dispatching...' : 'Launch Task'}
         </button>
+
+        {!selectedProject ? <p className="empty-state">Pick a single linked project first. The global view is read-only for task creation.</p> : null}
+        {selectedProject && !selectedProject.isLinked ? (
+          <p className="empty-state">This repository was discovered, but it is not linked yet. Use the repository onboarding panel to activate task dispatch.</p>
+        ) : null}
       </div>
     </section>
   );

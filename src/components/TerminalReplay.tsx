@@ -20,11 +20,11 @@ export function TerminalReplay({ logs }: TerminalReplayProps) {
     const terminal = new Terminal({
       convertEol: true,
       disableStdin: true,
-      fontFamily: 'Cascadia Mono, Consolas, monospace',
+      fontFamily: 'Geist Mono, Cascadia Mono, Consolas, monospace',
       fontSize: 12,
       theme: {
-        background: '#1f1d1b',
-        foreground: '#f4ede5',
+        background: '#0d0d0d',
+        foreground: '#f5f5f5',
       },
     });
     const fitAddon = new FitAddon();

@@ -21,6 +21,11 @@ pub fn find_projects(state: State<'_, AppState>, root_dir: String) -> Result<Vec
 }
 
 #[tauri::command]
+pub fn register_project(state: State<'_, AppState>, project_path: String) -> Result<Project, String> {
+    state.register_project(project_path.as_ref()).map_err(map_error)
+}
+
+#[tauri::command]
 pub fn list_tasks(state: State<'_, AppState>, project_id: String) -> Result<Vec<Task>, String> {
     state.list_tasks(&project_id).map_err(map_error)
 }

@@ -44,6 +44,45 @@ impl Storage {
         Ok(tasks)
     }
 
+    pub fn load_registered_projects(&self) -> Result<Vec<Project>> {
+        let path = self.project_registry_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read project registry at {}", path.display()))?;
+        let projects = serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse project registry at {}", path.display()))?;
+        Ok(projects)
+    }
+
+    pub fn save_registered_projects(&self, projects: &[Project]) -> Result<()> {
+        let path = self.project_registry_path();
+        self.ensure_parent(&path)?;
+        let content = serde_json::to_string_pretty(projects)?;
+        fs::write(&path, content)
+            .with_context(|| format!("failed to write project registry at {}", path.display()))?;
+        Ok(())
+    }
+
+    pub fn upsert_registered_project(&self, project: &Project) -> Result<()> {
+        let mut projects = self.load_registered_projects()?;
+        let key = normalize_project_path(&project.path);
+
+        if let Some(existing) = projects
+            .iter_mut()
+            .find(|entry| normalize_project_path(&entry.path) == key)
+        {
+            *existing = project.clone();
+        } else {
+            projects.push(project.clone());
+        }
+
+        projects.sort_by(|left, right| left.name.cmp(&right.name));
+        self.save_registered_projects(&projects)
+    }
+
     pub fn save_tasks(&self, project_id: &str, tasks: &[Task]) -> Result<()> {
         let path = self.tasks_path(project_id);
         self.ensure_parent(&path)?;
@@ -145,6 +184,8 @@ impl Storage {
                     name,
                     path: path.to_string_lossy().to_string(),
                     default_branch: "main".into(),
+                    is_linked: false,
+                    remote_url: None,
                 });
                 continue;
             }
@@ -157,6 +198,10 @@ impl Storage {
 
     fn project_dir(&self, project_id: &str) -> PathBuf {
         self.root.join("projects").join(sanitize_key(project_id))
+    }
+
+    fn project_registry_path(&self) -> PathBuf {
+        self.root.join("projects").join("registry.json")
     }
 
     fn tasks_path(&self, project_id: &str) -> PathBuf {
@@ -189,4 +234,8 @@ fn sanitize_key(value: &str) -> String {
     }
 
     key.trim_matches('-').to_string()
+}
+
+fn normalize_project_path(value: &str) -> String {
+    value.replace('\\', "/").to_ascii_lowercase()
 }

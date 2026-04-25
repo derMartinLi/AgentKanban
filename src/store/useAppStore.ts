@@ -20,6 +20,7 @@ export type AppState = {
 
 export type AppActions = {
   hydrateProjects: (projects: ProjectSummary[]) => void;
+  upsertProject: (project: ProjectSummary) => void;
   selectProject: (projectId: string) => void;
   setTasks: (projectId: string, tasks: TaskSummary[]) => void;
   upsertTask: (task: TaskSummary) => void;
@@ -55,6 +56,16 @@ const createInitialState = (): AppState => ({
   errorMessage: null,
 });
 
+function sortProjects(projects: ProjectSummary[]): ProjectSummary[] {
+  return [...projects].sort((left, right) => {
+    if (left.isLinked !== right.isLinked) {
+      return left.isLinked ? -1 : 1;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
 const createAppState = (
   set: (partial: Partial<AppStore> | ((state: AppStore) => Partial<AppStore>)) => void,
   get: () => AppStore,
@@ -62,12 +73,21 @@ const createAppState = (
   ...createInitialState(),
   hydrateProjects: (projects) =>
     set((state) => ({
-      projects,
+      projects: sortProjects(projects),
       currentProjectId:
         state.currentProjectId === 'all' || !projects.some((project) => project.id === state.currentProjectId)
           ? 'all'
           : state.currentProjectId,
     })),
+  upsertProject: (project) =>
+    set((state) => {
+      const hasExisting = state.projects.some((entry) => entry.id === project.id);
+      const projects = hasExisting
+        ? state.projects.map((entry) => (entry.id === project.id ? project : entry))
+        : [...state.projects, project];
+
+      return { projects: sortProjects(projects) };
+    }),
   selectProject: (projectId) =>
     set({
       currentProjectId: projectId,

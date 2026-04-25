@@ -1,4 +1,4 @@
-use app_lib::domain::{HarnessConfig, Task};
+use app_lib::domain::{HarnessConfig, Project, Task};
 use app_lib::storage::Storage;
 use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
 
@@ -30,6 +30,36 @@ fn persists_tasks_and_harness_config_per_project() {
     let loaded_config = storage.load_harness_config("project-alpha").unwrap();
 
     assert_eq!(loaded_config, config);
+}
+
+#[test]
+fn persists_registered_projects_across_reloads() {
+    let root = unique_temp_dir("agent-kanban-project-registry");
+    let storage = Storage::new(root.clone()).unwrap();
+
+    let projects = vec![
+        Project {
+            id: "alpha".into(),
+            name: "Alpha".into(),
+            path: "C:/repos/alpha".into(),
+            default_branch: "main".into(),
+            is_linked: true,
+            remote_url: Some("git@github.com:example/alpha.git".into()),
+        },
+        Project {
+            id: "beta".into(),
+            name: "Beta".into(),
+            path: "C:/repos/beta".into(),
+            default_branch: "develop".into(),
+            is_linked: true,
+            remote_url: Some("git@github.com:example/beta.git".into()),
+        },
+    ];
+
+    storage.save_registered_projects(&projects).unwrap();
+    let loaded_projects = storage.load_registered_projects().unwrap();
+
+    assert_eq!(loaded_projects, projects);
 }
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {

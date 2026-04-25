@@ -9,12 +9,14 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:ui": "vitest run src/lib/types.test.ts",
-    "tauri": "tauri"
+    "tauri": "node ./scripts/tauri-wrapper.mjs"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
     "@tauri-apps/api": "^2.8.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "geist": "^1.7.0",
     "monaco-editor": "^0.54.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

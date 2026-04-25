@@ -1,5 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CreateTaskComposer } from './components/CreateTaskComposer';
+import { ProjectOnboardingPanel } from './components/ProjectOnboardingPanel';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { PromptCard } from './components/PromptCard';
 import { TaskBoard } from './components/TaskBoard';
@@ -14,12 +15,14 @@ import {
   listTasks,
   loadHarnessConfig,
   loadTaskLogs,
+  registerProject,
   rejectTask,
   retryTask,
   saveHarnessConfig,
   startTask,
   subscribeToTaskEvents,
 } from './lib/backend';
+import { isTerminalTaskStatus } from './lib/types';
 import { getSelectedTask, getVisibleTasks, useAppStore } from './store/useAppStore';
 
 export function App() {
@@ -41,6 +44,7 @@ export function App() {
   const dismissQuestion = useAppStore((state) => state.dismissQuestion);
   const setActivePanel = useAppStore((state) => state.setActivePanel);
   const hydrateProjects = useAppStore((state) => state.hydrateProjects);
+  const upsertProject = useAppStore((state) => state.upsertProject);
   const setTasks = useAppStore((state) => state.setTasks);
   const upsertTask = useAppStore((state) => state.upsertTask);
   const appendTaskLog = useAppStore((state) => state.appendTaskLog);
@@ -51,17 +55,16 @@ export function App() {
   const setLoading = useAppStore((state) => state.setLoading);
   const setErrorMessage = useAppStore((state) => state.setErrorMessage);
   const setActiveQuestion = useAppStore((state) => state.setActiveQuestion);
+  const [isRegisteringProject, setIsRegisteringProject] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
 
   const tasks = useMemo(
     () => getVisibleTasks({ currentProjectId, tasksByProject }),
     [currentProjectId, tasksByProject],
   );
+  const allTasks = useMemo(() => Object.values(tasksByProject).flat(), [tasksByProject]);
   const selectedTask = useMemo(
-    () => getSelectedTask({
-      currentProjectId,
-      tasksByProject,
-      selectedTaskId,
-    }),
+    () => getSelectedTask({ currentProjectId, tasksByProject, selectedTaskId }),
     [currentProjectId, selectedTaskId, tasksByProject],
   );
   const logs = selectedTask ? taskLogs[selectedTask.id] ?? [] : [];
@@ -69,7 +72,53 @@ export function App() {
     () => projects.find((project) => project.id === currentProjectId) ?? null,
     [currentProjectId, projects],
   );
-  const selectedSettings = selectedProject ? settingsByProject[selectedProject.id] ?? null : null;
+  const selectedTaskProject = useMemo(
+    () => projects.find((project) => project.id === selectedTask?.projectId) ?? null,
+    [projects, selectedTask?.projectId],
+  );
+  const inspectedProject = selectedProject ?? selectedTaskProject;
+  const settingsProject = selectedProject ?? selectedTaskProject;
+  const selectedSettings = settingsProject ? settingsByProject[settingsProject.id] ?? null : null;
+  const projectTaskStats = useMemo(
+    () =>
+      Object.fromEntries(
+        projects.map((project) => {
+          const projectTasks = tasksByProject[project.id] ?? [];
+          return [
+            project.id,
+            {
+              total: projectTasks.length,
+              active: projectTasks.filter((task) => !isTerminalTaskStatus(task.status)).length,
+            },
+          ];
+        }),
+      ),
+    [projects, tasksByProject],
+  );
+  const projectNameById = useMemo(
+    () => Object.fromEntries(projects.map((project) => [project.id, project.name])),
+    [projects],
+  );
+  const activeTaskCount = useMemo(
+    () => allTasks.filter((task) => !isTerminalTaskStatus(task.status)).length,
+    [allTasks],
+  );
+  const linkedProjectCount = useMemo(
+    () => projects.filter((project) => project.isLinked).length,
+    [projects],
+  );
+  const awaitingAcceptanceCount = useMemo(
+    () => allTasks.filter((task) => task.status === 'AWAITING_ACCEPTANCE').length,
+    [allTasks],
+  );
+  const promptCount = useMemo(() => allTasks.filter((task) => task.pendingQuestion).length, [allTasks]);
+  const isBrowserPreviewMode = projectRoot === 'Browser preview mode';
+  const selectedWorkspaceLabel = selectedProject?.name ?? 'Global Project View';
+  const selectedWorkspaceStatus = selectedProject
+    ? selectedProject.isLinked
+      ? 'Linked and dispatchable'
+      : 'Discovered only'
+    : 'Cross-project control surface';
 
   useEffect(() => {
     if (isBootstrapped || projects.length > 0) {
@@ -86,10 +135,12 @@ export function App() {
           return;
         }
         setProjectRoot(root);
+
         const [cliTools, discoveredProjects] = await Promise.all([detectCliTools(), findProjects(root)]);
         if (cancelled) {
           return;
         }
+
         setAvailableCliTools(cliTools);
         hydrateProjects(discoveredProjects);
         await Promise.all(
@@ -186,101 +237,243 @@ export function App() {
     };
   }, [appendTaskLog, selectedTask]);
 
+  const handleRegisterProject = async (repositoryPath: string) => {
+    setRegistrationError(null);
+    setIsRegisteringProject(true);
+    try {
+      const project = await registerProject(repositoryPath);
+      upsertProject(project);
+      const [projectTasks, config] = await Promise.all([
+        listTasks(project.id),
+        loadHarnessConfig(project.id),
+      ]);
+      setTasks(project.id, projectTasks);
+      setProjectSettings(project.id, config);
+      selectProject(project.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRegistrationError(message);
+      throw new Error(message);
+    } finally {
+      setIsRegisteringProject(false);
+    }
+  };
+
   return (
     <div className="app-shell">
-      <ProjectSidebar currentProjectId={currentProjectId} onSelectProject={selectProject} projects={projects} />
+      <ProjectSidebar
+        currentProjectId={currentProjectId}
+        onSelectProject={selectProject}
+        projectTaskStats={projectTaskStats}
+        projects={projects}
+        totalActiveTaskCount={activeTaskCount}
+        totalTaskCount={allTasks.length}
+      />
 
       <main className="workspace">
-        <header className="hero panel">
-          <div>
-            <p className="eyebrow">Personal orchestration board</p>
+        <header className="panel command-deck">
+          <div className="hero-copy-block command-deck__copy">
+            <p className="eyebrow">Operational workbench</p>
             <h1>Agent Kanban</h1>
-            <p className="hero-copy">Route work across local AI CLIs, guardrails, and acceptance without leaving the desktop shell.</p>
-          </div>
-          <div className="hero-metrics">
-            <div>
-              <span className="metric-label">Visible Tasks</span>
-              <strong>{tasks.length}</strong>
+            <h2>Command Deck</h2>
+            <p className="hero-copy">
+              A Mintlify-bright control surface for linking repositories, dispatching AI tasks, watching
+              execution lanes, and shipping through review without dropping into a terminal-first workflow.
+            </p>
+            <div className="hero-chip-row">
+              <span className="ghost-pill">Git-backed projects</span>
+              <span className="ghost-pill">Isolated workspace copies</span>
+              <span className="ghost-pill">Guardrails + review</span>
+              <span className="ghost-pill">Desktop runtime orchestration</span>
             </div>
-            <div>
-              <span className="metric-label">Projects</span>
-              <strong>{projects.length}</strong>
+          </div>
+
+          <div className="command-deck__meta">
+            <div className="hero-metrics command-deck__metrics">
+              <div>
+                <span className="metric-label">Current view</span>
+                <strong>{selectedWorkspaceLabel}</strong>
+              </div>
+              <div>
+                <span className="metric-label">Linked repos</span>
+                <strong>{linkedProjectCount}</strong>
+              </div>
+              <div>
+                <span className="metric-label">CLI tools</span>
+                <strong>{availableCliTools.length}</strong>
+              </div>
+              <div>
+                <span className="metric-label">Active tasks</span>
+                <strong>{activeTaskCount}</strong>
+              </div>
+              <div>
+                <span className="metric-label">Awaiting acceptance</span>
+                <strong>{awaitingAcceptanceCount}</strong>
+              </div>
+              <div>
+                <span className="metric-label">Queued prompts</span>
+                <strong>{promptCount}</strong>
+              </div>
+            </div>
+
+            <div className="command-deck__context">
+              <div className="detail-block">
+                <span className="detail-label">Workspace status</span>
+                <p>{selectedWorkspaceStatus}</p>
+              </div>
+              <div className="detail-block">
+                <span className="detail-label">Discovery root</span>
+                <p>{projectRoot || 'Unset'}</p>
+              </div>
+              <div className="detail-block detail-block--wide">
+                <span className="detail-label">Remote origin</span>
+                <p>{selectedProject?.remoteUrl ?? 'Link a repository to activate remote-backed task dispatch.'}</p>
+              </div>
+              <div className="detail-block detail-block--wide">
+                <span className="detail-label">Board posture</span>
+                <p>
+                  {isBrowserPreviewMode
+                    ? 'Browser preview renders the interface, but linked repository validation and task execution still require the desktop runtime.'
+                    : 'This workspace keeps repositories read-safe by dispatching tasks into copied workspaces, dedicated branches, and guarded review flows.'}
+                </p>
+              </div>
             </div>
           </div>
         </header>
 
-        <section className="panel root-panel">
-          <div className="panel-heading panel-heading--inline">
-            <div>
-              <p className="eyebrow">Workspace Root</p>
-              <h2>Project Discovery</h2>
-            </div>
-            <span className="count-pill">{projectRoot || 'unset'}</span>
+        <div className="workspace-layout">
+          <div className="workspace-main">
+            <section className="panel quick-actions-panel">
+              <div className="panel-heading">
+                <p className="eyebrow">Operate</p>
+                <h2>Quick Actions</h2>
+                <p className="panel-copy">
+                  Link a repository, pick an execution tool, and launch an isolated branch workflow from one compact operations zone.
+                </p>
+              </div>
+
+              <section className="operations-grid">
+                <ProjectOnboardingPanel
+                  isRegistering={isRegisteringProject}
+                  linkedProjectCount={linkedProjectCount}
+                  onRegisterProject={handleRegisterProject}
+                  previewMode={isBrowserPreviewMode}
+                  projectRoot={projectRoot}
+                  registrationError={registrationError}
+                />
+
+                <CreateTaskComposer
+                  availableCliTools={availableCliTools}
+                  onCreateTask={async (input) => {
+                    const task = await createTask(input);
+                    upsertTask(task);
+                    selectProject(task.projectId);
+                    selectTask(task.id);
+                  }}
+                  selectedProject={selectedProject}
+                />
+              </section>
+            </section>
+
+            <section className="panel board-stage">
+              <div className="panel-heading board-stage__heading">
+                <div>
+                  <p className="eyebrow">Execution Board</p>
+                  <h2>{selectedWorkspaceLabel}</h2>
+                  <p className="panel-copy">
+                    Track queued work, active execution, review readiness, and acceptance flow across your linked repositories.
+                  </p>
+                </div>
+
+                <div className="board-stage__meta">
+                  <span className="ghost-pill">{selectedWorkspaceStatus}</span>
+                  <span className="ghost-pill">{allTasks.length} tracked tasks</span>
+                </div>
+              </div>
+
+              <div className="overview-grid board-stage__overview">
+                <div className="detail-block">
+                  <span className="detail-label">Selection</span>
+                  <p>{selectedWorkspaceLabel}</p>
+                </div>
+                <div className="detail-block">
+                  <span className="detail-label">Active execution</span>
+                  <p>{activeTaskCount} tasks currently moving through the pipeline.</p>
+                </div>
+                <div className="detail-block">
+                  <span className="detail-label">Human handoff</span>
+                  <p>{awaitingAcceptanceCount} tasks are waiting for review and acceptance.</p>
+                </div>
+                <div className="detail-block">
+                  <span className="detail-label">Questions</span>
+                  <p>{promptCount} task prompts are queued for operator input.</p>
+                </div>
+              </div>
+
+              {isLoading ? <p className="empty-state">Loading projects and task metadata...</p> : null}
+              {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
+
+              <TaskBoard
+                onSelectTask={selectTask}
+                projectNameById={projectNameById}
+                selectedTaskId={selectedTaskId}
+                showProjectName={currentProjectId === 'all'}
+                tasks={tasks}
+              />
+            </section>
           </div>
-          {isLoading ? <p className="empty-state">Loading projects and task metadata...</p> : null}
-          {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
-        </section>
 
-        <CreateTaskComposer
-          availableCliTools={availableCliTools}
-          onCreateTask={async (input) => {
-            const task = await createTask(input);
-            upsertTask(task);
-            selectProject(task.projectId);
-            selectTask(task.id);
-          }}
-          selectedProject={selectedProject}
-        />
-
-        <TaskBoard onSelectTask={selectTask} selectedTaskId={selectedTaskId} tasks={tasks} />
+          <TaskDetailsPanel
+            activePanel={activePanel}
+            awaitingAcceptanceCount={awaitingAcceptanceCount}
+            logs={logs}
+            onApproveTask={async () => {
+              if (!selectedTask) {
+                return;
+              }
+              const task = await approveTask(selectedTask.projectId, selectedTask.id);
+              upsertTask(task);
+            }}
+            onRejectTask={async () => {
+              if (!selectedTask) {
+                return;
+              }
+              const feedback = window.prompt('Why are you rejecting this task?', 'Please revise the implementation.') ?? '';
+              if (!feedback.trim()) {
+                return;
+              }
+              const task = await rejectTask(selectedTask.projectId, selectedTask.id, feedback);
+              upsertTask(task);
+            }}
+            onRetryTask={async () => {
+              if (!selectedTask) {
+                return;
+              }
+              const task = await retryTask(selectedTask.projectId, selectedTask.id);
+              upsertTask(task);
+            }}
+            onSaveSettings={async (config) => {
+              if (!settingsProject) {
+                return;
+              }
+              const saved = await saveHarnessConfig(settingsProject.id, config);
+              setProjectSettings(settingsProject.id, saved);
+            }}
+            onSelectPanel={setActivePanel}
+            onStartTask={async () => {
+              if (!selectedTask) {
+                return;
+              }
+              await startTask(selectedTask.projectId, selectedTask.id);
+            }}
+            project={inspectedProject}
+            promptCount={promptCount}
+            settings={selectedSettings}
+            task={selectedTask}
+            totalActiveTaskCount={activeTaskCount}
+          />
+        </div>
       </main>
-
-      <TaskDetailsPanel
-        activePanel={activePanel}
-        logs={logs}
-        onApproveTask={async () => {
-          if (!selectedTask) {
-            return;
-          }
-          const task = await approveTask(selectedTask.projectId, selectedTask.id);
-          upsertTask(task);
-        }}
-        onRejectTask={async () => {
-          if (!selectedTask) {
-            return;
-          }
-          const feedback = window.prompt('Why are you rejecting this task?', 'Please revise the implementation.') ?? '';
-          if (!feedback.trim()) {
-            return;
-          }
-          const task = await rejectTask(selectedTask.projectId, selectedTask.id, feedback);
-          upsertTask(task);
-        }}
-        onRetryTask={async () => {
-          if (!selectedTask) {
-            return;
-          }
-          const task = await retryTask(selectedTask.projectId, selectedTask.id);
-          upsertTask(task);
-        }}
-        onSaveSettings={async (config) => {
-          if (!selectedProject) {
-            return;
-          }
-          const saved = await saveHarnessConfig(selectedProject.id, config);
-          setProjectSettings(selectedProject.id, saved);
-        }}
-        onSelectPanel={setActivePanel}
-        onStartTask={async () => {
-          if (!selectedTask) {
-            return;
-          }
-          await startTask(selectedTask.projectId, selectedTask.id);
-        }}
-        project={selectedProject}
-        settings={selectedSettings}
-        task={selectedTask}
-      />
 
       <PromptCard
         onAnswer={(reply) => {

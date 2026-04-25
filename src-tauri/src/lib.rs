@@ -25,6 +25,7 @@ pub fn run() {
       commands::default_projects_root,
       commands::detect_cli_tools,
       commands::find_projects,
+      commands::register_project,
       commands::list_tasks,
       commands::create_task,
       commands::start_task,

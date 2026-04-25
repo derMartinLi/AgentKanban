@@ -4,7 +4,7 @@ use crate::{
     harness::build_harness_payload,
     storage::Storage,
 };
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -95,13 +95,55 @@ impl AppState {
         found
     }
 
-    pub fn find_projects(&self, root_dir: &Path) -> Result<Vec<Project>> {
-        let mut projects = self.storage.discover_projects(root_dir)?;
+    pub fn find_projects(&self, _root_dir: &Path) -> Result<Vec<Project>> {
+        let mut projects = self.storage.load_registered_projects()?;
         for project in &mut projects {
-            let branch = git_ops::current_branch(Path::new(&project.path)).unwrap_or_else(|_| "main".into());
-            project.default_branch = branch;
+            project.is_linked = true;
         }
+
+        for project in &mut projects {
+            let project_path = Path::new(&project.path);
+            let branch = git_ops::default_branch(project_path).unwrap_or_else(|_| "main".into());
+            project.default_branch = branch;
+            project.remote_url = git_ops::origin_remote_url(project_path).ok();
+            project.is_linked = project.is_linked && project.remote_url.is_some();
+        }
+
+        projects.retain(|project| project.is_linked);
+        projects.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(projects)
+    }
+
+    pub fn register_project(&self, project_path: &Path) -> Result<Project> {
+        if !project_path.exists() || !project_path.is_dir() {
+            return Err(anyhow!("repository path does not exist or is not a directory"));
+        }
+
+        if !project_path.join(".git").exists() {
+            return Err(anyhow!("project must point to a git repository"));
+        }
+
+        let name = project_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("project")
+            .to_string();
+
+        let remote_url = git_ops::origin_remote_url(project_path)
+            .context("project must have an origin remote to support collaboration flows")?;
+
+        let project = Project {
+            id: project_id_from_path(project_path),
+            name,
+            path: project_path.to_string_lossy().to_string(),
+            default_branch: git_ops::default_branch(project_path).unwrap_or_else(|_| "main".into()),
+            is_linked: true,
+            remote_url: Some(remote_url),
+        };
+
+        self.storage.upsert_registered_project(&project)?;
+        Ok(project)
     }
 
     pub fn list_tasks(&self, project_id: &str) -> Result<Vec<Task>> {
@@ -131,6 +173,19 @@ impl AppState {
     }
 
     pub fn create_task(&self, input: CreateTaskInput) -> Result<Task> {
+        let is_registered = self
+            .storage
+            .load_registered_projects()?
+            .into_iter()
+            .any(|project| normalize_project_path(&project.path) == normalize_project_path(&input.project_path));
+
+        if !is_registered {
+            return Err(anyhow!("project must be linked in Agent Kanban before creating tasks"));
+        }
+
+        git_ops::origin_remote_url(Path::new(&input.project_path))
+            .context("project must be linked to a git origin before creating tasks")?;
+
         let mut task = Task::new(
             Uuid::new_v4().to_string(),
             input.project_id.clone(),
@@ -239,7 +294,7 @@ impl AppState {
                 PathBuf::from(existing)
             } else {
                 let dir = self.storage.create_workspace_dir(task_id)?;
-                git_ops::create_workspace(Path::new(&source_path), &dir, &task.branch_name)?;
+                git_ops::create_workspace(Path::new(&source_path), &dir, &task.base_branch, &task.branch_name)?;
                 task.workspace_path = Some(dir.to_string_lossy().to_string());
                 self.save_task(project_id, task.clone())?;
                 dir
@@ -280,16 +335,24 @@ impl AppState {
                         .unwrap_or_default();
                     let mut review_task = self.get_task(project_id, task_id)?;
                     review_task.diff = Some(diff.clone());
+
+                    if let Err(error) = git_ops::push_branch(&workspace_path, &review_task.branch_name) {
+                        review_task.latest_error = Some(error.to_string());
+                        review_task = review_task.transition(TaskStatus::Blocked)?;
+                        self.save_task(project_id, review_task.clone())?;
+                        self.emit_task_update(app, project_id, &review_task);
+                        return Ok(());
+                    }
+
+                    review_task.remote_branch = Some(review_task.branch_name.clone());
                     review_task = review_task.transition(TaskStatus::AiReview)?;
                     self.save_task(project_id, review_task.clone())?;
                     self.emit_task_update(app, project_id, &review_task);
 
-                    let _ = git_ops::push_branch(&workspace_path, &review_task.branch_name);
                     let review = self.run_review(&workspace_path, &review_task, &config, &diff).await;
 
                     let mut awaiting = self.get_task(project_id, task_id)?;
                     awaiting.review = Some(review.unwrap_or_else(|error| error.to_string()));
-                    awaiting.remote_branch = Some(awaiting.branch_name.clone());
                     awaiting = awaiting.transition(TaskStatus::AwaitingAcceptance)?;
                     self.save_task(project_id, awaiting.clone())?;
                     self.emit_task_update(app, project_id, &awaiting);
@@ -637,4 +700,28 @@ fn create_task_title(description: &str) -> String {
 
 fn runtime_key(project_id: &str, task_id: &str) -> String {
     format!("{project_id}:{task_id}")
+}
+
+fn project_id_from_path(project_path: &Path) -> String {
+    let path_text = project_path.to_string_lossy();
+    let mut key = String::new();
+
+    for ch in path_text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            key.push(ch.to_ascii_lowercase());
+        } else if !key.ends_with('-') {
+            key.push('-');
+        }
+    }
+
+    let key = key.trim_matches('-').to_string();
+    if key.is_empty() {
+        "project".to_string()
+    } else {
+        key
+    }
+}
+
+fn normalize_project_path(value: &str) -> String {
+    value.replace('\\', "/").to_ascii_lowercase()
 }

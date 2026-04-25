@@ -6,8 +6,8 @@ describe('useAppStore', () => {
     const store = createAppStore();
 
     store.getState().hydrateProjects([
-      { id: 'alpha', name: 'Alpha', path: 'C:/alpha', defaultBranch: 'main' },
-      { id: 'beta', name: 'Beta', path: 'C:/beta', defaultBranch: 'main' },
+      { id: 'alpha', name: 'Alpha', path: 'C:/alpha', defaultBranch: 'main', isLinked: true },
+      { id: 'beta', name: 'Beta', path: 'C:/beta', defaultBranch: 'main', isLinked: true },
     ]);
 
     store.getState().setTasks('alpha', [
@@ -71,5 +71,35 @@ describe('useAppStore', () => {
     store.getState().dismissQuestion();
 
     expect(store.getState().activeQuestion).toBeNull();
+  });
+
+  it('upserts projects so manually linked repositories appear in the sidebar', () => {
+    const store = createAppStore();
+
+    store.getState().upsertProject({
+      id: 'agent-kanban',
+      name: 'AgentKanban',
+      path: 'C:/repos/agent-kanban',
+      defaultBranch: 'main',
+      isLinked: true,
+    });
+
+    store.getState().upsertProject({
+      id: 'agent-kanban',
+      name: 'AgentKanban',
+      path: 'C:/repos/agent-kanban',
+      defaultBranch: 'develop',
+      isLinked: true,
+    });
+
+    expect(store.getState().projects).toEqual([
+      {
+        id: 'agent-kanban',
+        name: 'AgentKanban',
+        path: 'C:/repos/agent-kanban',
+        defaultBranch: 'develop',
+        isLinked: true,
+      },
+    ]);
   });
 });

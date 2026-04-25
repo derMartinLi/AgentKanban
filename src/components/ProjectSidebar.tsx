@@ -18,81 +18,98 @@ export function ProjectSidebar({
   totalActiveTaskCount,
 }: ProjectSidebarProps) {
   return (
-    <aside className="panel sidebar app-nav">
-      <div className="app-nav__brand">
-        <div className="app-nav__brand-mark">AK</div>
-        <div>
+    <aside className="sidebar-rail">
+      <div className="sidebar-brand">
+        <div className="sidebar-brand__mark">AK</div>
+        <div className="sidebar-brand__copy">
           <p className="eyebrow">Agent Workspace</p>
           <h2>Agent Kanban</h2>
-          <p className="panel-copy">A bright command surface for repository-linked AI delivery.</p>
+          <p className="panel-copy">
+            Repository-linked delivery, operator visibility, and AI-assisted workflow control.
+          </p>
         </div>
       </div>
 
-      <div className="app-nav__section">
+      <div className="sidebar-section">
         <span className="detail-label">Control Surface</span>
-        <div className="metric-row metric-row--nav">
-          <div className="metric-tile">
+        <div className="sidebar-metrics">
+          <div className="sidebar-metric">
             <span className="metric-label">Linked repos</span>
             <strong>{projects.length}</strong>
           </div>
-          <div className="metric-tile">
+          <div className="sidebar-metric">
             <span className="metric-label">Active tasks</span>
             <strong>{totalActiveTaskCount}</strong>
+          </div>
+          <div className="sidebar-metric">
+            <span className="metric-label">Tracked items</span>
+            <strong>{totalTaskCount}</strong>
           </div>
         </div>
       </div>
 
-      <div className="app-nav__section">
+      <div className="sidebar-section">
         <span className="detail-label">Navigate</span>
-        <div className="app-nav__menu">
-          <span className="app-nav__menu-item app-nav__menu-item--active">Board</span>
-          <span className="app-nav__menu-item">Projects</span>
-          <span className="app-nav__menu-item">Insights</span>
-          <span className="app-nav__menu-item">Settings</span>
+        <div className="nav-menu">
+          <span className="nav-menu__item nav-menu__item--active">Board</span>
+          <span className="nav-menu__item">Dispatch</span>
+          <span className="nav-menu__item">Insights</span>
+          <span className="nav-menu__item">Settings</span>
         </div>
       </div>
 
-      <div className="app-nav__section app-nav__section--portfolio">
-        <div className="panel-heading">
+      <div className="sidebar-section sidebar-section--projects">
+        <div className="section-heading">
           <p className="eyebrow">Portfolio</p>
           <h2>Projects</h2>
-          <p className="panel-copy">Linked repositories stay isolated during task execution and review.</p>
+          <p className="panel-copy">Switch between linked repositories or stay in the global command view.</p>
         </div>
 
         <div className="project-list">
-        <button
-          className={currentProjectId === 'all' ? 'project-pill project-pill--active' : 'project-pill'}
-          onClick={() => onSelectProject('all')}
-          type="button"
-        >
-          <span className="project-pill__title-row">
-            <strong>All Projects</strong>
-            <span className="branch-badge">Global</span>
-          </span>
-          <small className="project-pill__path">Cross-project queue and acceptance view</small>
-          <span className="project-pill__meta">{totalTaskCount} tasks · {totalActiveTaskCount} active</span>
-        </button>
-        {projects.map((project) => (
           <button
-            key={project.id}
-            className={currentProjectId === project.id ? 'project-pill project-pill--active' : 'project-pill'}
-            onClick={() => onSelectProject(project.id)}
+            className={currentProjectId === 'all' ? 'project-switcher project-switcher--active' : 'project-switcher'}
+            onClick={() => onSelectProject('all')}
             type="button"
           >
-            <span className="project-pill__title-row">
-              <strong>{project.name}</strong>
-              <span className="branch-badge">{project.isLinked ? project.defaultBranch : 'Discover'}</span>
+            <span className="project-switcher__head">
+              <strong>All Projects</strong>
+              <span className="branch-badge">Global</span>
             </span>
-            <small className="project-pill__path">{project.path}</small>
-            <span className="project-pill__meta">
-              {project.isLinked
-                ? `${projectTaskStats[project.id]?.total ?? 0} tasks · ${projectTaskStats[project.id]?.active ?? 0} active`
-                : 'Discovered repo · link to activate'}
-            </span>
+            <small className="project-switcher__path">Cross-project queue and acceptance view</small>
+            <span className="project-switcher__meta">{totalTaskCount} tasks · {totalActiveTaskCount} active</span>
           </button>
-        ))}
-        {projects.length === 0 ? <p className="empty-state">Link a git repository to start dispatching work.</p> : null}
+
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              className={currentProjectId === project.id ? 'project-switcher project-switcher--active' : 'project-switcher'}
+              onClick={() => onSelectProject(project.id)}
+              type="button"
+            >
+              <span className="project-switcher__head">
+                <strong>{project.name}</strong>
+                <span className="branch-badge">{project.isLinked ? project.defaultBranch : 'Discover'}</span>
+              </span>
+              <small className="project-switcher__path">{project.path}</small>
+              <span className="project-switcher__meta">
+                {project.isLinked
+                  ? `${projectTaskStats[project.id]?.total ?? 0} tasks · ${projectTaskStats[project.id]?.active ?? 0} active`
+                  : 'Discovered repo · link to activate'}
+              </span>
+            </button>
+          ))}
+
+          {projects.length === 0 ? <p className="empty-state">Link a git repository to start dispatching work.</p> : null}
+        </div>
       </div>
+
+      <div className="sidebar-foot">
+        <span className="detail-label">Global Project View</span>
+        <p>
+          {projects.length === 0
+            ? 'No repositories linked yet. Use the dispatch studio to onboard your first workspace.'
+            : `${projects.length} repositories discovered, with ${totalActiveTaskCount} active tasks moving through the board.`}
+        </p>
       </div>
     </aside>
   );

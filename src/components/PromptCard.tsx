@@ -18,7 +18,7 @@ export function PromptCard({ question, onAnswer, onDismiss }: PromptCardProps) {
         <h2 id="prompt-title">{question.q}</h2>
         <div className="prompt-options">
           {question.opts.map((option) => (
-            <button key={option} className="project-pill" onClick={() => onAnswer(option)} type="button">
+            <button key={option} className="prompt-option" onClick={() => onAnswer(option)} type="button">
               {option}
             </button>
           ))}

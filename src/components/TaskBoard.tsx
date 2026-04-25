@@ -1,4 +1,4 @@
-import { BOARD_COLUMNS, formatTaskStatus, type TaskSummary } from '../lib/types';
+import { formatTaskStatus, type TaskStatus, type TaskSummary } from '../lib/types';
 
 type TaskBoardProps = {
   tasks: TaskSummary[];
@@ -8,48 +8,134 @@ type TaskBoardProps = {
   projectNameById: Record<string, string>;
 };
 
+const BOARD_LANES: Array<{
+  id: string;
+  title: string;
+  accent: string;
+  statuses: TaskStatus[];
+  emptyLabel: string;
+}> = [
+  {
+    id: 'backlog',
+    title: 'Backlog',
+    accent: 'lane-accent--mint',
+    statuses: ['PENDING'],
+    emptyLabel: 'Waiting for dispatch',
+  },
+  {
+    id: 'in-progress',
+    title: 'In Progress',
+    accent: 'lane-accent--cyan',
+    statuses: ['EXECUTING', 'WAITING_FOR_INPUT', 'GUARDRAIL_CHECK'],
+    emptyLabel: 'No live execution',
+  },
+  {
+    id: 'review',
+    title: 'Code Review',
+    accent: 'lane-accent--green',
+    statuses: ['AI_REVIEW', 'AWAITING_ACCEPTANCE'],
+    emptyLabel: 'Review queue is clear',
+  },
+  {
+    id: 'attention',
+    title: 'Needs Attention',
+    accent: 'lane-accent--amber',
+    statuses: ['NEEDS_REVISION', 'BLOCKED', 'FAILED'],
+    emptyLabel: 'No operator escalations',
+  },
+  {
+    id: 'done',
+    title: 'Done',
+    accent: 'lane-accent--blue',
+    statuses: ['COMPLETED'],
+    emptyLabel: 'No completed runs yet',
+  },
+];
+
+function formatStamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Recent';
+  }
+
+  return date.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getTicketSignal(task: TaskSummary): string {
+  if (task.pendingQuestion) {
+    return 'Needs input';
+  }
+
+  if (task.latestError) {
+    return 'Error';
+  }
+
+  if (task.revisionCount > 0) {
+    return `${task.revisionCount} revision${task.revisionCount > 1 ? 's' : ''}`;
+  }
+
+  return formatTaskStatus(task.status);
+}
+
 export function TaskBoard({ tasks, selectedTaskId, onSelectTask, showProjectName, projectNameById }: TaskBoardProps) {
   return (
-    <section className="board-grid">
-      {BOARD_COLUMNS.map((column) => {
-        const columnTasks = tasks.filter((task) => column.statuses.includes(task.status));
+    <section className="kanban-stage">
+      <div className="kanban-grid">
+        {BOARD_LANES.map((lane) => {
+          const laneTasks = tasks.filter((task) => lane.statuses.includes(task.status));
 
-        return (
-          <div key={column.id} className="panel board-column">
-            <div className="panel-heading panel-heading--inline board-column__heading">
-              <div>
-                <p className="eyebrow">Execution lane</p>
-                <h2>{column.title}</h2>
-                <p className="panel-copy">{columnTasks.length === 0 ? 'No active cards in this lane yet.' : 'Work items currently flowing through this stage.'}</p>
+          return (
+            <div key={lane.id} className="kanban-column">
+              <div className="kanban-column__header">
+                <div className={`kanban-column__accent ${lane.accent}`} />
+                <div>
+                  <p className="eyebrow">Execution Lane</p>
+                  <h3>{lane.title}</h3>
+                </div>
+                <span className="lane-count">{laneTasks.length}</span>
               </div>
-              <span className="count-pill">{columnTasks.length}</span>
-            </div>
 
-            <div className="task-stack">
-              {columnTasks.length === 0 ? <p className="empty-state">No tasks in this lane.</p> : null}
-              {columnTasks.map((task) => (
-                <button
-                  key={task.id}
-                  className={selectedTaskId === task.id ? 'task-card task-card--active' : 'task-card'}
-                  onClick={() => onSelectTask(task.id)}
-                  type="button"
-                >
-                  <div className="task-card__meta-row">
-                    <span className="task-status">{formatTaskStatus(task.status)}</span>
-                    {showProjectName ? <span className="task-project-tag">{projectNameById[task.projectId] ?? task.projectId}</span> : null}
-                  </div>
-                  <strong>{task.title}</strong>
-                  <p className="task-card__description">{task.description}</p>
-                  <div className="task-card__footer">
-                    <small className="task-card__footnote">{task.branchName} from {task.baseBranch}</small>
-                    {task.pendingQuestion ? <span className="branch-badge">Needs input</span> : null}
-                  </div>
-                </button>
-              ))}
+              <div className="kanban-column__body">
+                {laneTasks.length === 0 ? <p className="lane-empty">{lane.emptyLabel}</p> : null}
+
+                {laneTasks.map((task) => (
+                  <button
+                    key={task.id}
+                    className={selectedTaskId === task.id ? 'ticket ticket--active' : 'ticket'}
+                    onClick={() => onSelectTask(task.id)}
+                    type="button"
+                  >
+                    <div className="ticket__head">
+                      <span className="ticket__id">{task.id}</span>
+                      <span className="ticket__signal">{getTicketSignal(task)}</span>
+                    </div>
+
+                    <strong>{task.title}</strong>
+                    <p className="ticket__description">{task.description}</p>
+
+                    <div className="ticket__meta">
+                      <span>{task.branchName}</span>
+                      <span>{formatStamp(task.updatedAt)}</span>
+                    </div>
+
+                    <div className="ticket__footer">
+                      <span className="ticket__branch">base {task.baseBranch}</span>
+                      {showProjectName ? (
+                        <span className="task-project-tag">{projectNameById[task.projectId] ?? task.projectId}</span>
+                      ) : null}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </section>
   );
 }

@@ -112,6 +112,14 @@ export function App() {
     [allTasks],
   );
   const promptCount = useMemo(() => allTasks.filter((task) => task.pendingQuestion).length, [allTasks]);
+  const taskStatusCounts = useMemo(
+    () =>
+      allTasks.reduce<Record<string, number>>((acc, task) => {
+        acc[task.status] = (acc[task.status] ?? 0) + 1;
+        return acc;
+      }, {}),
+    [allTasks],
+  );
   const isBrowserPreviewMode = projectRoot === 'Browser preview mode';
   const selectedWorkspaceLabel = selectedProject?.name ?? 'Global Project View';
   const selectedWorkspaceStatus = selectedProject
@@ -271,208 +279,205 @@ export function App() {
       />
 
       <main className="workspace">
-        <header className="panel command-deck">
-          <div className="hero-copy-block command-deck__copy">
-            <p className="eyebrow">Operational workbench</p>
-            <h1>Agent Kanban</h1>
-            <h2>Command Deck</h2>
-            <p className="hero-copy">
-              A Mintlify-bright control surface for linking repositories, dispatching AI tasks, watching
-              execution lanes, and shipping through review without dropping into a terminal-first workflow.
-            </p>
-            <div className="hero-chip-row">
-              <span className="ghost-pill">Git-backed projects</span>
-              <span className="ghost-pill">Isolated workspace copies</span>
-              <span className="ghost-pill">Guardrails + review</span>
-              <span className="ghost-pill">Desktop runtime orchestration</span>
-            </div>
-          </div>
-
-          <div className="command-deck__meta">
-            <div className="hero-metrics command-deck__metrics">
-              <div>
-                <span className="metric-label">Current view</span>
-                <strong>{selectedWorkspaceLabel}</strong>
+        <section className="workspace-frame">
+          <header className="workspace-header command-deck">
+            <div className="workspace-header__main">
+              <div className="workspace-header__copy">
+                <p className="eyebrow">{selectedWorkspaceLabel.toUpperCase()}</p>
+                <h1>Agent Kanban</h1>
+                <h2>Command Deck</h2>
+                <p className="hero-copy">
+                  A control-room Kanban for repository-linked agents: dispatch work, watch execution lanes,
+                  surface guardrail risk, and close review loops without falling back to a terminal wall.
+                </p>
               </div>
-              <div>
+
+              <div className="workspace-toolbar">
+                <div className="workspace-toolbar__actions">
+                  <button
+                    className="ghost-button"
+                    onClick={() => document.getElementById('dispatch-studio')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    type="button"
+                  >
+                    + Add New
+                  </button>
+                  <button className="accent-button" onClick={() => setActivePanel('details')} type="button">
+                    AI Insights
+                  </button>
+                </div>
+                <label className="search-shell" aria-label="Search tasks">
+                  <span>Search tasks, branches, repos</span>
+                  <input readOnly value="" />
+                </label>
+              </div>
+            </div>
+
+            <div className="workspace-glance">
+              <div className="workspace-glance__item">
+                <span className="metric-label">Workspace status</span>
+                <strong>{selectedWorkspaceStatus}</strong>
+              </div>
+              <div className="workspace-glance__item">
                 <span className="metric-label">Linked repos</span>
                 <strong>{linkedProjectCount}</strong>
               </div>
-              <div>
+              <div className="workspace-glance__item">
                 <span className="metric-label">CLI tools</span>
                 <strong>{availableCliTools.length}</strong>
               </div>
-              <div>
-                <span className="metric-label">Active tasks</span>
+              <div className="workspace-glance__item">
+                <span className="metric-label">Open execution</span>
                 <strong>{activeTaskCount}</strong>
               </div>
-              <div>
-                <span className="metric-label">Awaiting acceptance</span>
-                <strong>{awaitingAcceptanceCount}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Queued prompts</span>
-                <strong>{promptCount}</strong>
-              </div>
             </div>
+          </header>
 
-            <div className="command-deck__context">
-              <div className="detail-block">
-                <span className="detail-label">Workspace status</span>
-                <p>{selectedWorkspaceStatus}</p>
-              </div>
-              <div className="detail-block">
-                <span className="detail-label">Discovery root</span>
-                <p>{projectRoot || 'Unset'}</p>
-              </div>
-              <div className="detail-block detail-block--wide">
-                <span className="detail-label">Remote origin</span>
-                <p>{selectedProject?.remoteUrl ?? 'Link a repository to activate remote-backed task dispatch.'}</p>
-              </div>
-              <div className="detail-block detail-block--wide">
-                <span className="detail-label">Board posture</span>
-                <p>
-                  {isBrowserPreviewMode
-                    ? 'Browser preview renders the interface, but linked repository validation and task execution still require the desktop runtime.'
-                    : 'This workspace keeps repositories read-safe by dispatching tasks into copied workspaces, dedicated branches, and guarded review flows.'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </header>
+          <div className="workspace-layout">
+            <div className="workspace-main">
+              <section className="board-panel">
+                <div className="board-panel__header">
+                  <div>
+                    <p className="eyebrow">Execution Board</p>
+                    <h2>{selectedWorkspaceLabel}</h2>
+                    <p className="panel-copy">
+                      Multi-lane task flow with review posture, operator prompts, and runtime context visible at a glance.
+                    </p>
+                  </div>
 
-        <div className="workspace-layout">
-          <div className="workspace-main">
-            <section className="panel quick-actions-panel">
-              <div className="panel-heading">
-                <p className="eyebrow">Operate</p>
-                <h2>Quick Actions</h2>
-                <p className="panel-copy">
-                  Link a repository, pick an execution tool, and launch an isolated branch workflow from one compact operations zone.
-                </p>
-              </div>
+                  <div className="board-panel__chips">
+                    <span className="ghost-pill">{selectedWorkspaceStatus}</span>
+                    <span className="ghost-pill">{allTasks.length} tracked tasks</span>
+                    <span className="ghost-pill">{awaitingAcceptanceCount} awaiting acceptance</span>
+                  </div>
+                </div>
 
-              <section className="operations-grid">
-                <ProjectOnboardingPanel
-                  isRegistering={isRegisteringProject}
-                  linkedProjectCount={linkedProjectCount}
-                  onRegisterProject={handleRegisterProject}
-                  previewMode={isBrowserPreviewMode}
-                  projectRoot={projectRoot}
-                  registrationError={registrationError}
+                <div className="board-summary">
+                  <div className="board-summary__item">
+                    <span className="detail-label">Selection</span>
+                    <p>{selectedWorkspaceLabel}</p>
+                  </div>
+                  <div className="board-summary__item">
+                    <span className="detail-label">Discovery root</span>
+                    <p>{projectRoot || 'Unset'}</p>
+                  </div>
+                  <div className="board-summary__item">
+                    <span className="detail-label">Remote origin</span>
+                    <p>{selectedProject?.remoteUrl ?? 'Link a repository to activate remote-backed task dispatch.'}</p>
+                  </div>
+                  <div className="board-summary__item">
+                    <span className="detail-label">Board posture</span>
+                    <p>
+                      {isBrowserPreviewMode
+                        ? 'Browser preview renders the shell, but repository validation and execution still require the desktop runtime.'
+                        : 'Tasks execute in copied workspaces and guarded review flows so the source tree stays safe.'}
+                    </p>
+                  </div>
+                </div>
+
+                {isLoading ? <p className="empty-state">Loading projects and task metadata...</p> : null}
+                {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
+
+                <TaskBoard
+                  onSelectTask={selectTask}
+                  projectNameById={projectNameById}
+                  selectedTaskId={selectedTaskId}
+                  showProjectName={currentProjectId === 'all'}
+                  tasks={tasks}
                 />
 
-                <CreateTaskComposer
-                  availableCliTools={availableCliTools}
-                  onCreateTask={async (input) => {
-                    const task = await createTask(input);
-                    upsertTask(task);
-                    selectProject(task.projectId);
-                    selectTask(task.id);
-                  }}
-                  selectedProject={selectedProject}
-                />
+                <section className="ops-dock" id="dispatch-studio">
+                  <div className="ops-dock__header">
+                    <div>
+                      <p className="eyebrow">Quick Actions</p>
+                      <h2>Quick Actions</h2>
+                      <p className="panel-copy">
+                        Dispatch Studio: link repositories, configure runtime inputs, and launch task runs from the same workflow rail.
+                      </p>
+                    </div>
+                    <div className="board-panel__chips">
+                      <span className="ghost-pill">{promptCount} queued prompts</span>
+                      <span className="ghost-pill">{availableCliTools.length || 0} CLI profiles</span>
+                    </div>
+                  </div>
+
+                  <div className="ops-dock__grid">
+                    <ProjectOnboardingPanel
+                      isRegistering={isRegisteringProject}
+                      linkedProjectCount={linkedProjectCount}
+                      onRegisterProject={handleRegisterProject}
+                      previewMode={isBrowserPreviewMode}
+                      projectRoot={projectRoot}
+                      registrationError={registrationError}
+                    />
+
+                    <CreateTaskComposer
+                      availableCliTools={availableCliTools}
+                      onCreateTask={async (input) => {
+                        const task = await createTask(input);
+                        upsertTask(task);
+                        selectProject(task.projectId);
+                        selectTask(task.id);
+                      }}
+                      selectedProject={selectedProject}
+                    />
+                  </div>
+                </section>
               </section>
-            </section>
+            </div>
 
-            <section className="panel board-stage">
-              <div className="panel-heading board-stage__heading">
-                <div>
-                  <p className="eyebrow">Execution Board</p>
-                  <h2>{selectedWorkspaceLabel}</h2>
-                  <p className="panel-copy">
-                    Track queued work, active execution, review readiness, and acceptance flow across your linked repositories.
-                  </p>
-                </div>
-
-                <div className="board-stage__meta">
-                  <span className="ghost-pill">{selectedWorkspaceStatus}</span>
-                  <span className="ghost-pill">{allTasks.length} tracked tasks</span>
-                </div>
-              </div>
-
-              <div className="overview-grid board-stage__overview">
-                <div className="detail-block">
-                  <span className="detail-label">Selection</span>
-                  <p>{selectedWorkspaceLabel}</p>
-                </div>
-                <div className="detail-block">
-                  <span className="detail-label">Active execution</span>
-                  <p>{activeTaskCount} tasks currently moving through the pipeline.</p>
-                </div>
-                <div className="detail-block">
-                  <span className="detail-label">Human handoff</span>
-                  <p>{awaitingAcceptanceCount} tasks are waiting for review and acceptance.</p>
-                </div>
-                <div className="detail-block">
-                  <span className="detail-label">Questions</span>
-                  <p>{promptCount} task prompts are queued for operator input.</p>
-                </div>
-              </div>
-
-              {isLoading ? <p className="empty-state">Loading projects and task metadata...</p> : null}
-              {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
-
-              <TaskBoard
-                onSelectTask={selectTask}
-                projectNameById={projectNameById}
-                selectedTaskId={selectedTaskId}
-                showProjectName={currentProjectId === 'all'}
-                tasks={tasks}
-              />
-            </section>
+            <TaskDetailsPanel
+              activePanel={activePanel}
+              awaitingAcceptanceCount={awaitingAcceptanceCount}
+              logs={logs}
+              onApproveTask={async () => {
+                if (!selectedTask) {
+                  return;
+                }
+                const task = await approveTask(selectedTask.projectId, selectedTask.id);
+                upsertTask(task);
+              }}
+              onRejectTask={async () => {
+                if (!selectedTask) {
+                  return;
+                }
+                const feedback = window.prompt('Why are you rejecting this task?', 'Please revise the implementation.') ?? '';
+                if (!feedback.trim()) {
+                  return;
+                }
+                const task = await rejectTask(selectedTask.projectId, selectedTask.id, feedback);
+                upsertTask(task);
+              }}
+              onRetryTask={async () => {
+                if (!selectedTask) {
+                  return;
+                }
+                const task = await retryTask(selectedTask.projectId, selectedTask.id);
+                upsertTask(task);
+              }}
+              onSaveSettings={async (config) => {
+                if (!settingsProject) {
+                  return;
+                }
+                const saved = await saveHarnessConfig(settingsProject.id, config);
+                setProjectSettings(settingsProject.id, saved);
+              }}
+              onSelectPanel={setActivePanel}
+              onStartTask={async () => {
+                if (!selectedTask) {
+                  return;
+                }
+                await startTask(selectedTask.projectId, selectedTask.id);
+              }}
+              project={inspectedProject}
+              promptCount={promptCount}
+              settings={selectedSettings}
+              task={selectedTask}
+              taskStatusCounts={taskStatusCounts}
+              totalActiveTaskCount={activeTaskCount}
+              totalTaskCount={allTasks.length}
+            />
           </div>
-
-          <TaskDetailsPanel
-            activePanel={activePanel}
-            awaitingAcceptanceCount={awaitingAcceptanceCount}
-            logs={logs}
-            onApproveTask={async () => {
-              if (!selectedTask) {
-                return;
-              }
-              const task = await approveTask(selectedTask.projectId, selectedTask.id);
-              upsertTask(task);
-            }}
-            onRejectTask={async () => {
-              if (!selectedTask) {
-                return;
-              }
-              const feedback = window.prompt('Why are you rejecting this task?', 'Please revise the implementation.') ?? '';
-              if (!feedback.trim()) {
-                return;
-              }
-              const task = await rejectTask(selectedTask.projectId, selectedTask.id, feedback);
-              upsertTask(task);
-            }}
-            onRetryTask={async () => {
-              if (!selectedTask) {
-                return;
-              }
-              const task = await retryTask(selectedTask.projectId, selectedTask.id);
-              upsertTask(task);
-            }}
-            onSaveSettings={async (config) => {
-              if (!settingsProject) {
-                return;
-              }
-              const saved = await saveHarnessConfig(settingsProject.id, config);
-              setProjectSettings(settingsProject.id, saved);
-            }}
-            onSelectPanel={setActivePanel}
-            onStartTask={async () => {
-              if (!selectedTask) {
-                return;
-              }
-              await startTask(selectedTask.projectId, selectedTask.id);
-            }}
-            project={inspectedProject}
-            promptCount={promptCount}
-            settings={selectedSettings}
-            task={selectedTask}
-            totalActiveTaskCount={activeTaskCount}
-          />
-        </div>
+        </section>
       </main>
 
       <PromptCard

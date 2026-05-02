@@ -4,7 +4,7 @@ import { App } from './App';
 import { resetAppStore, useAppStore } from './store/useAppStore';
 
 describe('App', () => {
-  it('renders the multi-project shell with a global view by default', () => {
+  it('renders the IDE-style shell with project navigation and task actions', () => {
     resetAppStore();
 
     useAppStore.getState().hydrateProjects([
@@ -14,12 +14,12 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Agent Kanban' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /command deck/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /quick actions/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /ai insights/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'All Projects' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /link repo/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /new task/i }).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /all projects/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /alpha/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /beta/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: /execution flow/i })).toBeInTheDocument();
   });
 });

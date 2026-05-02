@@ -1,61 +1,70 @@
+import { Bot, Clock3, Plus } from 'lucide-react';
+import { Empty } from 'antd';
 import { formatTaskStatus, type TaskStatus, type TaskSummary } from '../lib/types';
 
 type TaskBoardProps = {
   tasks: TaskSummary[];
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onCreateTask: () => void;
   showProjectName: boolean;
   projectNameById: Record<string, string>;
 };
 
-const BOARD_LANES: Array<{
+const BOARD_COLUMNS: Array<{
   id: string;
   title: string;
-  accent: string;
+  hint: string;
   statuses: TaskStatus[];
-  emptyLabel: string;
 }> = [
   {
-    id: 'backlog',
-    title: 'Backlog',
-    accent: 'lane-accent--mint',
+    id: 'todo',
+    title: 'To Do',
+    hint: 'Queued and ready to start',
     statuses: ['PENDING'],
-    emptyLabel: 'Waiting for dispatch',
   },
   {
-    id: 'in-progress',
+    id: 'running',
     title: 'In Progress',
-    accent: 'lane-accent--cyan',
-    statuses: ['EXECUTING', 'WAITING_FOR_INPUT', 'GUARDRAIL_CHECK'],
-    emptyLabel: 'No live execution',
+    hint: 'Executing, waiting, or blocked',
+    statuses: ['EXECUTING', 'WAITING_FOR_INPUT', 'GUARDRAIL_CHECK', 'NEEDS_REVISION', 'BLOCKED', 'FAILED'],
   },
   {
     id: 'review',
-    title: 'Code Review',
-    accent: 'lane-accent--green',
-    statuses: ['AI_REVIEW', 'AWAITING_ACCEPTANCE'],
-    emptyLabel: 'Review queue is clear',
-  },
-  {
-    id: 'attention',
-    title: 'Needs Attention',
-    accent: 'lane-accent--amber',
-    statuses: ['NEEDS_REVISION', 'BLOCKED', 'FAILED'],
-    emptyLabel: 'No operator escalations',
-  },
-  {
-    id: 'done',
-    title: 'Done',
-    accent: 'lane-accent--blue',
-    statuses: ['COMPLETED'],
-    emptyLabel: 'No completed runs yet',
+    title: 'Review / Done',
+    hint: 'Ready for review or already merged',
+    statuses: ['AI_REVIEW', 'AWAITING_ACCEPTANCE', 'COMPLETED'],
   },
 ];
+
+function getStatusTone(status: TaskStatus): string {
+  switch (status) {
+    case 'PENDING':
+      return 'var(--color-todo)';
+    case 'EXECUTING':
+    case 'GUARDRAIL_CHECK':
+      return 'var(--color-in-progress)';
+    case 'WAITING_FOR_INPUT':
+      return 'var(--color-waiting)';
+    case 'AI_REVIEW':
+    case 'AWAITING_ACCEPTANCE':
+      return 'var(--color-review)';
+    case 'COMPLETED':
+      return 'var(--color-done)';
+    case 'FAILED':
+    case 'BLOCKED':
+      return 'var(--color-failed)';
+    case 'NEEDS_REVISION':
+      return 'var(--color-waiting)';
+    default:
+      return 'var(--color-primary)';
+  }
+}
 
 function formatStamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return 'Recent';
+    return '--';
   }
 
   return date.toLocaleString([], {
@@ -66,73 +75,123 @@ function formatStamp(value: string): string {
   });
 }
 
-function getTicketSignal(task: TaskSummary): string {
-  if (task.pendingQuestion) {
-    return 'Needs input';
+function formatDuration(start: string, end: string): string {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return '--';
   }
 
-  if (task.latestError) {
-    return 'Error';
+  const seconds = Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
   }
 
-  if (task.revisionCount > 0) {
-    return `${task.revisionCount} revision${task.revisionCount > 1 ? 's' : ''}`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) {
+    return `${minutes}m ${remainingSeconds}s`;
   }
 
-  return formatTaskStatus(task.status);
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
 }
 
-export function TaskBoard({ tasks, selectedTaskId, onSelectTask, showProjectName, projectNameById }: TaskBoardProps) {
+function getCliBadge(task: TaskSummary): string {
+  return task.cliCommand.split(/[\\/]/).at(-1) || task.cliCommand;
+}
+
+export function TaskBoard({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  onCreateTask,
+  showProjectName,
+  projectNameById,
+}: TaskBoardProps) {
   return (
-    <section className="kanban-stage">
-      <div className="kanban-grid">
-        {BOARD_LANES.map((lane) => {
-          const laneTasks = tasks.filter((task) => lane.statuses.includes(task.status));
+    <section className="task-board">
+      <div className="task-board__header">
+        <div>
+          <span className="section-kicker">Task Board</span>
+          <h2>Execution flow</h2>
+          <p>Compact lanes for queue, live execution, and review-ready work.</p>
+        </div>
+
+        <button className="primary-button" onClick={onCreateTask} type="button">
+          <Plus size={16} />
+          <span>New Task</span>
+        </button>
+      </div>
+
+      <div className="task-board__grid">
+        {BOARD_COLUMNS.map((column) => {
+          const columnTasks = tasks.filter((task) => column.statuses.includes(task.status));
 
           return (
-            <div key={lane.id} className="kanban-column">
-              <div className="kanban-column__header">
-                <div className={`kanban-column__accent ${lane.accent}`} />
+            <section key={column.id} className="task-column">
+              <header className="task-column__header">
                 <div>
-                  <p className="eyebrow">Execution Lane</p>
-                  <h3>{lane.title}</h3>
+                  <h3>{column.title}</h3>
+                  <p>{column.hint}</p>
                 </div>
-                <span className="lane-count">{laneTasks.length}</span>
+                <span className="count-badge">{columnTasks.length}</span>
+              </header>
+
+              <div className="task-column__body">
+                {columnTasks.length === 0 ? (
+                  <div className="task-column__empty">
+                    <Empty description="没有进行中的任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  </div>
+                ) : null}
+
+                {columnTasks.map((task) => {
+                  const tone = getStatusTone(task.status);
+
+                  return (
+                    <button
+                      key={task.id}
+                      className={selectedTaskId === task.id ? 'task-card task-card--active' : 'task-card'}
+                      onClick={() => onSelectTask(task.id)}
+                      style={{ ['--task-tone' as string]: tone }}
+                      type="button"
+                    >
+                      <div className="task-card__status" />
+
+                      <div className="task-card__body">
+                        <div className="task-card__topline">
+                          <span className="task-card__state">{formatTaskStatus(task.status)}</span>
+                          <span className="task-card__stamp">{formatStamp(task.updatedAt)}</span>
+                        </div>
+
+                        <strong>{task.title}</strong>
+                        <p>{task.description}</p>
+
+                        {showProjectName ? (
+                          <span className="task-card__project">{projectNameById[task.projectId] ?? task.projectId}</span>
+                        ) : null}
+
+                        <div className="task-card__meta">
+                          <span>{task.branchName}</span>
+                          <span>{task.baseBranch}</span>
+                        </div>
+
+                        <div className="task-card__footer">
+                          <span className="task-card__tool">
+                            <Bot size={14} />
+                            <span>{getCliBadge(task)}</span>
+                          </span>
+                          <span className="task-card__tool">
+                            <Clock3 size={14} />
+                            <span>{formatDuration(task.createdAt, task.updatedAt)}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-
-              <div className="kanban-column__body">
-                {laneTasks.length === 0 ? <p className="lane-empty">{lane.emptyLabel}</p> : null}
-
-                {laneTasks.map((task) => (
-                  <button
-                    key={task.id}
-                    className={selectedTaskId === task.id ? 'ticket ticket--active' : 'ticket'}
-                    onClick={() => onSelectTask(task.id)}
-                    type="button"
-                  >
-                    <div className="ticket__head">
-                      <span className="ticket__id">{task.id}</span>
-                      <span className="ticket__signal">{getTicketSignal(task)}</span>
-                    </div>
-
-                    <strong>{task.title}</strong>
-                    <p className="ticket__description">{task.description}</p>
-
-                    <div className="ticket__meta">
-                      <span>{task.branchName}</span>
-                      <span>{formatStamp(task.updatedAt)}</span>
-                    </div>
-
-                    <div className="ticket__footer">
-                      <span className="ticket__branch">base {task.baseBranch}</span>
-                      {showProjectName ? (
-                        <span className="task-project-tag">{projectNameById[task.projectId] ?? task.projectId}</span>
-                      ) : null}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+            </section>
           );
         })}
       </div>

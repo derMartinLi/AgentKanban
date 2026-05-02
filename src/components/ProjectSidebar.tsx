@@ -1,115 +1,177 @@
-import { type ProjectSummary } from '../lib/types';
+import { Badge, Switch, Tooltip } from 'antd';
+import {
+  FolderGit2,
+  HelpCircle,
+  MoonStar,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Settings2,
+  SunMedium,
+} from 'lucide-react';
+import type { ThemeMode } from '../store/useAppStore';
+import type { ProjectSummary } from '../lib/types';
 
 type ProjectSidebarProps = {
   projects: ProjectSummary[];
   currentProjectId: string;
   onSelectProject: (projectId: string) => void;
+  onOpenOnboarding: () => void;
+  onOpenSettings: () => void;
+  onToggleCollapsed: () => void;
   projectTaskStats: Record<string, { total: number; active: number }>;
   totalTaskCount: number;
   totalActiveTaskCount: number;
+  promptCount: number;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+  collapsed: boolean;
 };
+
+function getProjectInitial(name: string): string {
+  return name.trim().charAt(0).toUpperCase() || 'A';
+}
 
 export function ProjectSidebar({
   projects,
   currentProjectId,
   onSelectProject,
+  onOpenOnboarding,
+  onOpenSettings,
+  onToggleCollapsed,
   projectTaskStats,
   totalTaskCount,
   totalActiveTaskCount,
+  promptCount,
+  theme,
+  onToggleTheme,
+  collapsed,
 }: ProjectSidebarProps) {
   return (
-    <aside className="sidebar-rail">
-      <div className="sidebar-brand">
-        <div className="sidebar-brand__mark">AK</div>
-        <div className="sidebar-brand__copy">
-          <p className="eyebrow">Agent Workspace</p>
-          <h2>Agent Kanban</h2>
-          <p className="panel-copy">
-            Repository-linked delivery, operator visibility, and AI-assisted workflow control.
-          </p>
+    <aside className={collapsed ? 'project-sidebar project-sidebar--collapsed' : 'project-sidebar'}>
+      <div className="project-sidebar__top">
+        <div className="project-sidebar__brand">
+          <div className="project-sidebar__logo">AI</div>
+          {!collapsed ? (
+            <div>
+              <strong>AI Task</strong>
+              <p>Developer control center</p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="project-sidebar__toolbar">
+          <Tooltip title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            <button className="icon-button" onClick={onToggleCollapsed} type="button">
+              {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
+          </Tooltip>
+          <Tooltip title="Link repository">
+            <button className="icon-button icon-button--primary" onClick={onOpenOnboarding} type="button">
+              <Plus size={16} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
-      <div className="sidebar-section">
-        <span className="detail-label">Control Surface</span>
-        <div className="sidebar-metrics">
-          <div className="sidebar-metric">
-            <span className="metric-label">Linked repos</span>
-            <strong>{projects.length}</strong>
-          </div>
-          <div className="sidebar-metric">
-            <span className="metric-label">Active tasks</span>
+      {!collapsed ? (
+        <div className="project-sidebar__summary">
+          <div>
+            <span>Running</span>
             <strong>{totalActiveTaskCount}</strong>
           </div>
-          <div className="sidebar-metric">
-            <span className="metric-label">Tracked items</span>
+          <div>
+            <span>Total</span>
             <strong>{totalTaskCount}</strong>
           </div>
+          <div>
+            <span>Waiting</span>
+            <strong>{promptCount}</strong>
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="sidebar-section">
-        <span className="detail-label">Navigate</span>
-        <div className="nav-menu">
-          <span className="nav-menu__item nav-menu__item--active">Board</span>
-          <span className="nav-menu__item">Dispatch</span>
-          <span className="nav-menu__item">Insights</span>
-          <span className="nav-menu__item">Settings</span>
-        </div>
-      </div>
+      <div className="project-sidebar__section">
+        {!collapsed ? <span className="project-sidebar__label">Projects</span> : null}
 
-      <div className="sidebar-section sidebar-section--projects">
-        <div className="section-heading">
-          <p className="eyebrow">Portfolio</p>
-          <h2>Projects</h2>
-          <p className="panel-copy">Switch between linked repositories or stay in the global command view.</p>
-        </div>
-
-        <div className="project-list">
-          <button
-            className={currentProjectId === 'all' ? 'project-switcher project-switcher--active' : 'project-switcher'}
-            onClick={() => onSelectProject('all')}
-            type="button"
-          >
-            <span className="project-switcher__head">
+        <button
+          className={currentProjectId === 'all' ? 'project-pill project-pill--active' : 'project-pill'}
+          onClick={() => onSelectProject('all')}
+          type="button"
+        >
+          <div className="project-pill__avatar project-pill__avatar--all">
+            <FolderGit2 size={16} />
+          </div>
+          {!collapsed ? (
+            <div className="project-pill__body">
               <strong>All Projects</strong>
-              <span className="branch-badge">Global</span>
-            </span>
-            <small className="project-switcher__path">Cross-project queue and acceptance view</small>
-            <span className="project-switcher__meta">{totalTaskCount} tasks · {totalActiveTaskCount} active</span>
-          </button>
+              <span>{totalTaskCount} tasks · {totalActiveTaskCount} running</span>
+            </div>
+          ) : null}
+        </button>
 
-          {projects.map((project) => (
-            <button
-              key={project.id}
-              className={currentProjectId === project.id ? 'project-switcher project-switcher--active' : 'project-switcher'}
-              onClick={() => onSelectProject(project.id)}
-              type="button"
-            >
-              <span className="project-switcher__head">
-                <strong>{project.name}</strong>
-                <span className="branch-badge">{project.isLinked ? project.defaultBranch : 'Discover'}</span>
-              </span>
-              <small className="project-switcher__path">{project.path}</small>
-              <span className="project-switcher__meta">
-                {project.isLinked
-                  ? `${projectTaskStats[project.id]?.total ?? 0} tasks · ${projectTaskStats[project.id]?.active ?? 0} active`
-                  : 'Discovered repo · link to activate'}
-              </span>
-            </button>
-          ))}
+        <div className="project-sidebar__list">
+          {projects.map((project) => {
+            const stats = projectTaskStats[project.id] ?? { total: 0, active: 0 };
 
-          {projects.length === 0 ? <p className="empty-state">Link a git repository to start dispatching work.</p> : null}
+            return (
+              <button
+                key={project.id}
+                className={currentProjectId === project.id ? 'project-pill project-pill--active' : 'project-pill'}
+                onClick={() => onSelectProject(project.id)}
+                type="button"
+              >
+                <div className="project-pill__avatar">
+                  <Badge dot={stats.active > 0} offset={[-2, 22]} color={project.isLinked ? '#51CF66' : '#FCC419'}>
+                    <span>{getProjectInitial(project.name)}</span>
+                  </Badge>
+                </div>
+                {!collapsed ? (
+                  <div className="project-pill__body">
+                    <strong>{project.name}</strong>
+                    <span>
+                      {project.isLinked ? `${stats.total} tasks · ${stats.active} active` : 'Discovered only'}
+                    </span>
+                  </div>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div className="sidebar-foot">
-        <span className="detail-label">Global Project View</span>
-        <p>
-          {projects.length === 0
-            ? 'No repositories linked yet. Use the dispatch studio to onboard your first workspace.'
-            : `${projects.length} repositories discovered, with ${totalActiveTaskCount} active tasks moving through the board.`}
-        </p>
+      <div className="project-sidebar__footer">
+        <div className="theme-toggle">
+          {!collapsed ? (
+            <>
+              <span>{theme === 'dark' ? 'Dark' : 'Light'} theme</span>
+              <Switch
+                aria-label="Toggle theme"
+                checked={theme === 'dark'}
+                checkedChildren={<MoonStar size={14} />}
+                unCheckedChildren={<SunMedium size={14} />}
+                onChange={onToggleTheme}
+              />
+            </>
+          ) : (
+            <button className="icon-button" onClick={onToggleTheme} type="button">
+              {theme === 'dark' ? <MoonStar size={16} /> : <SunMedium size={16} />}
+            </button>
+          )}
+        </div>
+
+        <div className="project-sidebar__footer-actions">
+          <Tooltip title="Project settings">
+            <button className="icon-button" onClick={onOpenSettings} type="button">
+              <Settings2 size={16} />
+            </button>
+          </Tooltip>
+          <Tooltip title="Help">
+            <button className="icon-button" type="button">
+              <HelpCircle size={16} />
+            </button>
+          </Tooltip>
+        </div>
       </div>
     </aside>
   );

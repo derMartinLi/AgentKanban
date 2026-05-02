@@ -1,6 +1,43 @@
 import { create } from 'zustand';
 import { createStore } from 'zustand/vanilla';
-import { EMPTY_HARNESS_CONFIG, type HarnessConfig, type ProjectSummary, type TaskLogEntry, type TaskQuestion, type TaskSummary } from '../lib/types';
+import {
+  EMPTY_HARNESS_CONFIG,
+  type HarnessConfig,
+  type ProjectSummary,
+  type TaskLogEntry,
+  type TaskQuestion,
+  type TaskSummary,
+} from '../lib/types';
+
+export type ThemeMode = 'light' | 'dark';
+export type DetailTab = 'overview' | 'terminal' | 'changes' | 'settings';
+
+const THEME_STORAGE_KEY = 'agent-kanban.theme';
+
+function detectInitialTheme(): ThemeMode {
+  if (typeof window === 'undefined') {
+    return 'dark';
+  }
+
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === 'light' || stored === 'dark') {
+    return stored;
+  }
+
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+
+  return 'light';
+}
+
+function persistTheme(theme: ThemeMode): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+}
 
 export type AppState = {
   projects: ProjectSummary[];
@@ -10,7 +47,12 @@ export type AppState = {
   selectedTaskId: string | null;
   activeQuestion: TaskQuestion | null;
   settingsByProject: Record<string, HarnessConfig>;
-  activePanel: 'details' | 'settings';
+  activePanel: DetailTab;
+  detailPanelOpen: boolean;
+  createTaskOpen: boolean;
+  diffMode: boolean;
+  sidebarCollapsed: boolean;
+  theme: ThemeMode;
   availableCliTools: string[];
   projectRoot: string;
   isBootstrapped: boolean;
@@ -30,7 +72,13 @@ export type AppActions = {
   setProjectSettings: (projectId: string, settings: HarnessConfig) => void;
   updateProjectSettings: (projectId: string, patch: Partial<HarnessConfig>) => void;
   appendTaskLog: (taskId: string, entry: TaskLogEntry) => void;
-  setActivePanel: (panel: 'details' | 'settings') => void;
+  setActivePanel: (panel: DetailTab) => void;
+  setDetailPanelOpen: (open: boolean) => void;
+  setCreateTaskOpen: (open: boolean) => void;
+  setDiffMode: (open: boolean) => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  setTheme: (theme: ThemeMode) => void;
+  toggleTheme: () => void;
   setAvailableCliTools: (tools: string[]) => void;
   setProjectRoot: (projectRoot: string) => void;
   setBootstrapped: (bootstrapped: boolean) => void;
@@ -48,7 +96,12 @@ const createInitialState = (): AppState => ({
   selectedTaskId: null,
   activeQuestion: null,
   settingsByProject: {},
-  activePanel: 'details',
+  activePanel: 'overview',
+  detailPanelOpen: false,
+  createTaskOpen: false,
+  diffMode: false,
+  sidebarCollapsed: false,
+  theme: detectInitialTheme(),
   availableCliTools: [],
   projectRoot: '',
   isBootstrapped: false,
@@ -92,6 +145,7 @@ const createAppState = (
     set({
       currentProjectId: projectId,
       selectedTaskId: getVisibleTasks({ ...get(), currentProjectId: projectId })[0]?.id ?? null,
+      diffMode: false,
     }),
   setTasks: (projectId, tasks) =>
     set((state) => ({
@@ -142,7 +196,20 @@ const createAppState = (
         [taskId]: [...(state.taskLogs[taskId] ?? []), entry],
       },
     })),
-  setActivePanel: (panel) => set({ activePanel: panel }),
+  setActivePanel: (activePanel) => set({ activePanel }),
+  setDetailPanelOpen: (detailPanelOpen) => set({ detailPanelOpen }),
+  setCreateTaskOpen: (createTaskOpen) => set({ createTaskOpen }),
+  setDiffMode: (diffMode) => set({ diffMode }),
+  setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+  setTheme: (theme) => {
+    persistTheme(theme);
+    set({ theme });
+  },
+  toggleTheme: () => {
+    const theme = get().theme === 'dark' ? 'light' : 'dark';
+    persistTheme(theme);
+    set({ theme });
+  },
   setAvailableCliTools: (tools) => set({ availableCliTools: tools }),
   setProjectRoot: (projectRoot) => set({ projectRoot }),
   setBootstrapped: (isBootstrapped) => set({ isBootstrapped }),

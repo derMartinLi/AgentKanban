@@ -1,26 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { AutoComplete, Button, Drawer, Empty, Input, Select } from 'antd';
+import { Plus, Trash2 } from 'lucide-react';
 import type { CreateTaskInput, ProjectSummary } from '../lib/types';
 
-type CreateTaskComposerProps = {
-  availableCliTools: string[];
-  selectedProject: ProjectSummary | null;
-  onCreateTask: (input: CreateTaskInput) => Promise<void>;
+type EnvVarRow = {
+  key: string;
+  value: string;
 };
 
-function parseEnvVars(source: string): Record<string, string> {
-  return source
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .reduce<Record<string, string>>((acc, line) => {
-      const [key, ...rest] = line.split('=');
-      if (!key || rest.length === 0) {
-        return acc;
-      }
-      acc[key.trim()] = rest.join('=').trim();
-      return acc;
-    }, {});
-}
+type CreateTaskComposerProps = {
+  open: boolean;
+  onClose: () => void;
+  availableCliTools: string[];
+  projects: ProjectSummary[];
+  currentProjectId: string;
+  onCreateTask: (input: CreateTaskInput) => Promise<void>;
+};
 
 function parseCliArgs(value: string): string[] {
   return value
@@ -29,131 +24,213 @@ function parseCliArgs(value: string): string[] {
     .filter(Boolean);
 }
 
-export function CreateTaskComposer({ availableCliTools, selectedProject, onCreateTask }: CreateTaskComposerProps) {
+function toEnvRecord(rows: EnvVarRow[]): Record<string, string> {
+  return rows.reduce<Record<string, string>>((acc, row) => {
+    if (!row.key.trim()) {
+      return acc;
+    }
+
+    acc[row.key.trim()] = row.value;
+    return acc;
+  }, {});
+}
+
+export function CreateTaskComposer({
+  open,
+  onClose,
+  availableCliTools,
+  projects,
+  currentProjectId,
+  onCreateTask,
+}: CreateTaskComposerProps) {
+  const linkedProjects = useMemo(() => projects.filter((project) => project.isLinked), [projects]);
+  const preferredProjectId = useMemo(() => {
+    if (linkedProjects.some((project) => project.id === currentProjectId)) {
+      return currentProjectId;
+    }
+
+    return linkedProjects[0]?.id ?? undefined;
+  }, [currentProjectId, linkedProjects]);
+
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(preferredProjectId);
   const [description, setDescription] = useState('');
   const [cliCommand, setCliCommand] = useState(availableCliTools[0] ?? 'codex');
   const [cliArgs, setCliArgs] = useState('');
-  const [envVars, setEnvVars] = useState('');
+  const [envVars, setEnvVars] = useState<EnvVarRow[]>([{ key: '', value: '' }]);
   const [submitting, setSubmitting] = useState(false);
 
-  const canSubmit = useMemo(
-    () => Boolean(selectedProject?.isLinked && description.trim() && cliCommand.trim()),
-    [cliCommand, description, selectedProject],
-  );
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setSelectedProjectId(preferredProjectId);
+    setCliCommand(availableCliTools[0] ?? 'codex');
+  }, [availableCliTools, open, preferredProjectId]);
+
+  const selectedProject = linkedProjects.find((project) => project.id === selectedProjectId) ?? null;
+  const canSubmit = Boolean(selectedProject && description.trim() && cliCommand.trim());
 
   return (
-    <section className="panel composer-panel">
-      <div className="panel-heading">
-        <p className="eyebrow">Dispatch</p>
-        <h2>Launch Task</h2>
-        <p className="panel-copy">
-          Dispatch only against a linked repository. Agent Kanban branches from the selected base,
-          runs in a copied workspace, and keeps the source tree safe for review.
-        </p>
-      </div>
-
-      <div className="form-stack">
-        <label className="field">
-          <span>Target project</span>
-          <input readOnly value={selectedProject?.name ?? 'Select a concrete project'} />
-        </label>
-
-        <div className="detail-grid detail-grid--compact">
-          <div className="detail-block">
-            <span className="detail-label">Repository path</span>
-            <p>{selectedProject?.path ?? 'Choose a linked repository from the sidebar.'}</p>
-          </div>
-          <div className="detail-block">
-            <span className="detail-label">Base branch</span>
-            <p>{selectedProject?.defaultBranch ?? 'main'}</p>
-          </div>
-          <div className="detail-block detail-block--wide">
-            <span className="detail-label">Remote origin</span>
-            <p>{selectedProject?.remoteUrl ?? 'Link this repository to verify an origin remote before dispatching tasks.'}</p>
-          </div>
+    <Drawer
+      className="task-composer-drawer"
+      closable
+      onClose={onClose}
+      open={open}
+      placement="right"
+      title="New Task"
+    >
+      {linkedProjects.length === 0 ? (
+        <div className="drawer-empty-state">
+          <Empty description="Link a repository before creating a task." image={Empty.PRESENTED_IMAGE_SIMPLE} />
         </div>
+      ) : (
+        <div className="drawer-stack">
+          <div className="drawer-intro">
+            <span className="section-kicker">Task Composer</span>
+            <h2>Start a new agent run</h2>
+            <p>Choose a linked project, a CLI profile, and the task brief the agent should execute.</p>
+          </div>
 
-        <label className="field">
-          <span>Task description</span>
-          <textarea
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Describe the change you want the agent to make."
-            rows={5}
-            value={description}
-          />
-        </label>
-
-        <div className="field-grid">
           <label className="field">
-            <span>CLI command</span>
-            <input
-              list="cli-tools"
-              onChange={(event) => setCliCommand(event.target.value)}
-              value={cliCommand}
+            <span>Project</span>
+            <Select
+              onChange={setSelectedProjectId}
+              options={linkedProjects.map((project) => ({
+                label: project.name,
+                value: project.id,
+              }))}
+              placeholder="Select project"
+              value={selectedProjectId}
             />
-            <datalist id="cli-tools">
-              {availableCliTools.map((tool) => (
-                <option key={tool} value={tool} />
+          </label>
+
+          <div className="detail-grid detail-grid--compact">
+            <div className="detail-block">
+              <span className="detail-label">Base branch</span>
+              <p>{selectedProject?.defaultBranch ?? 'main'}</p>
+            </div>
+            <div className="detail-block detail-block--wide">
+              <span className="detail-label">Repository path</span>
+              <p>{selectedProject?.path ?? 'Select a project first.'}</p>
+            </div>
+          </div>
+
+          <label className="field">
+            <span>Task description</span>
+            <Input.TextArea
+              autoSize={{ minRows: 6, maxRows: 10 }}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Describe the implementation, expected output, and acceptance hints."
+              value={description}
+            />
+          </label>
+
+          <div className="field-grid">
+            <label className="field">
+              <span>CLI tool</span>
+              <AutoComplete
+                onChange={setCliCommand}
+                options={availableCliTools.map((tool) => ({ label: tool, value: tool }))}
+                placeholder="Choose detected tool or type your own"
+                value={cliCommand}
+              />
+            </label>
+
+            <label className="field">
+              <span>CLI args</span>
+              <Input
+                onChange={(event) => setCliArgs(event.target.value)}
+                placeholder="--sandbox workspace-write"
+                value={cliArgs}
+              />
+            </label>
+          </div>
+
+          <div className="field">
+            <span>Environment variables</span>
+            <div className="env-table">
+              {envVars.map((row, index) => (
+                <div key={`${index}-${row.key}`} className="env-table__row">
+                  <Input
+                    onChange={(event) =>
+                      setEnvVars((current) =>
+                        current.map((entry, entryIndex) =>
+                          entryIndex === index ? { ...entry, key: event.target.value } : entry,
+                        ),
+                      )
+                    }
+                    placeholder="KEY"
+                    value={row.key}
+                  />
+                  <Input
+                    onChange={(event) =>
+                      setEnvVars((current) =>
+                        current.map((entry, entryIndex) =>
+                          entryIndex === index ? { ...entry, value: event.target.value } : entry,
+                        ),
+                      )
+                    }
+                    placeholder="VALUE"
+                    value={row.value}
+                  />
+                  <button
+                    aria-label={`Delete env var ${index + 1}`}
+                    className="icon-button"
+                    onClick={() => setEnvVars((current) => current.filter((_, entryIndex) => entryIndex !== index))}
+                    type="button"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               ))}
-            </datalist>
-          </label>
+              <button
+                className="secondary-button"
+                onClick={() => setEnvVars((current) => [...current, { key: '', value: '' }])}
+                type="button"
+              >
+                <Plus size={14} />
+                <span>Add variable</span>
+              </button>
+            </div>
+          </div>
 
-          <label className="field">
-            <span>CLI args</span>
-            <input
-              onChange={(event) => setCliArgs(event.target.value)}
-              placeholder="--sandbox workspace-write"
-              value={cliArgs}
-            />
-          </label>
+          <div className="drawer-actions">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button
+              loading={submitting}
+              onClick={async () => {
+                if (!selectedProject) {
+                  return;
+                }
+
+                setSubmitting(true);
+                try {
+                  await onCreateTask({
+                    projectId: selectedProject.id,
+                    projectPath: selectedProject.path,
+                    baseBranch: selectedProject.defaultBranch,
+                    description,
+                    cliCommand,
+                    cliArgs: parseCliArgs(cliArgs),
+                    envVars: toEnvRecord(envVars),
+                  });
+                  setDescription('');
+                  setCliArgs('');
+                  setEnvVars([{ key: '', value: '' }]);
+                  onClose();
+                } finally {
+                  setSubmitting(false);
+                }
+              }}
+              type="primary"
+              disabled={!canSubmit}
+            >
+              Start Task
+            </Button>
+          </div>
         </div>
-
-        <label className="field">
-          <span>Task env vars</span>
-          <textarea
-            onChange={(event) => setEnvVars(event.target.value)}
-            placeholder={'OPENAI_API_KEY=...\nNODE_ENV=development'}
-            rows={4}
-            value={envVars}
-          />
-        </label>
-
-        <button
-          className="primary-button"
-          disabled={!canSubmit || submitting}
-          onClick={async () => {
-            if (!selectedProject) {
-              return;
-            }
-
-            setSubmitting(true);
-            try {
-              await onCreateTask({
-                projectId: selectedProject.id,
-                projectPath: selectedProject.path,
-                baseBranch: selectedProject.defaultBranch,
-                description,
-                cliCommand,
-                cliArgs: parseCliArgs(cliArgs),
-                envVars: parseEnvVars(envVars),
-              });
-              setDescription('');
-              setCliArgs('');
-              setEnvVars('');
-            } finally {
-              setSubmitting(false);
-            }
-          }}
-          type="button"
-        >
-          {submitting ? 'Dispatching...' : 'Launch Task'}
-        </button>
-
-        {!selectedProject ? <p className="empty-state">Pick a single linked project first. The global view is read-only for task creation.</p> : null}
-        {selectedProject && !selectedProject.isLinked ? (
-          <p className="empty-state">This repository was discovered, but it is not linked yet. Use the repository onboarding panel to activate task dispatch.</p>
-        ) : null}
-      </div>
-    </section>
+      )}
+    </Drawer>
   );
 }

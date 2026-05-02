@@ -1,52 +1,67 @@
-import { useEffect, useRef } from 'react';
+import { DiffEditor } from '@monaco-editor/react';
+import type { ParsedDiffFile } from '../lib/diff';
+import type { ThemeMode } from '../store/useAppStore';
 
 type DiffPreviewProps = {
-  diff: string | undefined;
+  file: ParsedDiffFile | null;
+  theme: ThemeMode;
+  height?: number | string;
 };
 
-export function DiffPreview({ diff }: DiffPreviewProps) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
+function inferLanguage(path: string): string {
+  const extension = path.split('.').at(-1)?.toLowerCase();
+  switch (extension) {
+    case 'ts':
+    case 'tsx':
+      return 'typescript';
+    case 'js':
+    case 'jsx':
+      return 'javascript';
+    case 'rs':
+      return 'rust';
+    case 'json':
+      return 'json';
+    case 'css':
+      return 'css';
+    case 'md':
+      return 'markdown';
+    case 'yml':
+    case 'yaml':
+      return 'yaml';
+    case 'html':
+      return 'html';
+    default:
+      return 'plaintext';
+  }
+}
 
-  useEffect(() => {
-    let editor: any = null;
-    let originalModel: any = null;
-    let modifiedModel: any = null;
-
-    async function setup() {
-      if (!hostRef.current || !diff || typeof window === 'undefined') {
-        return;
-      }
-
-      const monaco = await import('monaco-editor/esm/vs/editor/editor.api');
-      editor = monaco.editor.createDiffEditor(hostRef.current, {
-        automaticLayout: true,
-        fontSize: 12,
-        minimap: { enabled: false },
-        readOnly: true,
-      });
-      originalModel = monaco.editor.createModel('', 'text/plain');
-      modifiedModel = monaco.editor.createModel(diff, 'diff');
-      if (editor) {
-        editor.setModel({ original: originalModel, modified: modifiedModel });
-      }
-    }
-
-    void setup();
-
-    return () => {
-      editor?.dispose();
-      originalModel?.dispose();
-      modifiedModel?.dispose();
-    };
-  }, [diff]);
-
-  if (!diff) {
+export function DiffPreview({ file, theme, height = 320 }: DiffPreviewProps) {
+  if (!file) {
     return <p className="empty-state">No diff captured yet.</p>;
   }
 
   if (typeof window === 'undefined') {
-    return <pre className="code-block">{diff}</pre>;
+    return <pre className="code-block">{file.patch}</pre>;
   }
 
-  return <div className="diff-surface" ref={hostRef} />;
+  return (
+    <div className="diff-preview">
+      <DiffEditor
+        height={height}
+        language={inferLanguage(file.newPath || file.oldPath)}
+        modified={file.after || file.patch}
+        options={{
+          automaticLayout: true,
+          fontSize: 12,
+          minimap: { enabled: false },
+          originalEditable: false,
+          readOnly: true,
+          renderOverviewRuler: false,
+          scrollBeyondLastLine: false,
+        }}
+        original={file.before}
+        theme={theme === 'dark' ? 'vs-dark' : 'vs'}
+      />
+    </div>
+  );
 }

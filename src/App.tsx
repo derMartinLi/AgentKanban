@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { App as AntdApp, ConfigProvider, Drawer, Empty, Skeleton, theme as antdTheme } from 'antd';
+import { BellDot, FolderPlus, Plus, Search } from 'lucide-react';
 import { CreateTaskComposer } from './components/CreateTaskComposer';
 import { ProjectOnboardingPanel } from './components/ProjectOnboardingPanel';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { PromptCard } from './components/PromptCard';
 import { TaskBoard } from './components/TaskBoard';
 import { TaskDetailsPanel } from './components/TaskDetailsPanel';
+import { TaskDiffWorkspace } from './components/TaskDiffWorkspace';
 import {
   answerQuestion,
   approveTask,
@@ -25,7 +28,8 @@ import {
 import { isTerminalTaskStatus } from './lib/types';
 import { getSelectedTask, getVisibleTasks, useAppStore } from './store/useAppStore';
 
-export function App() {
+function AppShell() {
+  const { message } = AntdApp.useApp();
   const projects = useAppStore((state) => state.projects);
   const currentProjectId = useAppStore((state) => state.currentProjectId);
   const tasksByProject = useAppStore((state) => state.tasksByProject);
@@ -33,6 +37,11 @@ export function App() {
   const selectedTaskId = useAppStore((state) => state.selectedTaskId);
   const activeQuestion = useAppStore((state) => state.activeQuestion);
   const activePanel = useAppStore((state) => state.activePanel);
+  const detailPanelOpen = useAppStore((state) => state.detailPanelOpen);
+  const createTaskOpen = useAppStore((state) => state.createTaskOpen);
+  const diffMode = useAppStore((state) => state.diffMode);
+  const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed);
+  const themeMode = useAppStore((state) => state.theme);
   const settingsByProject = useAppStore((state) => state.settingsByProject);
   const availableCliTools = useAppStore((state) => state.availableCliTools);
   const projectRoot = useAppStore((state) => state.projectRoot);
@@ -43,6 +52,11 @@ export function App() {
   const selectTask = useAppStore((state) => state.selectTask);
   const dismissQuestion = useAppStore((state) => state.dismissQuestion);
   const setActivePanel = useAppStore((state) => state.setActivePanel);
+  const setDetailPanelOpen = useAppStore((state) => state.setDetailPanelOpen);
+  const setCreateTaskOpen = useAppStore((state) => state.setCreateTaskOpen);
+  const setDiffMode = useAppStore((state) => state.setDiffMode);
+  const setSidebarCollapsed = useAppStore((state) => state.setSidebarCollapsed);
+  const toggleTheme = useAppStore((state) => state.toggleTheme);
   const hydrateProjects = useAppStore((state) => state.hydrateProjects);
   const upsertProject = useAppStore((state) => state.upsertProject);
   const setTasks = useAppStore((state) => state.setTasks);
@@ -57,12 +71,17 @@ export function App() {
   const setActiveQuestion = useAppStore((state) => state.setActiveQuestion);
   const [isRegisteringProject, setIsRegisteringProject] = useState(false);
   const [registrationError, setRegistrationError] = useState<string | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   const tasks = useMemo(
     () => getVisibleTasks({ currentProjectId, tasksByProject }),
     [currentProjectId, tasksByProject],
   );
   const allTasks = useMemo(() => Object.values(tasksByProject).flat(), [tasksByProject]);
+  const taskById = useMemo(
+    () => Object.fromEntries(allTasks.map((task) => [task.id, task])),
+    [allTasks],
+  );
   const selectedTask = useMemo(
     () => getSelectedTask({ currentProjectId, tasksByProject, selectedTaskId }),
     [currentProjectId, selectedTaskId, tasksByProject],
@@ -77,8 +96,7 @@ export function App() {
     [projects, selectedTask?.projectId],
   );
   const inspectedProject = selectedProject ?? selectedTaskProject;
-  const settingsProject = selectedProject ?? selectedTaskProject;
-  const selectedSettings = settingsProject ? settingsByProject[settingsProject.id] ?? null : null;
+  const selectedSettings = inspectedProject ? settingsByProject[inspectedProject.id] ?? null : null;
   const projectTaskStats = useMemo(
     () =>
       Object.fromEntries(
@@ -112,21 +130,17 @@ export function App() {
     [allTasks],
   );
   const promptCount = useMemo(() => allTasks.filter((task) => task.pendingQuestion).length, [allTasks]);
-  const taskStatusCounts = useMemo(
-    () =>
-      allTasks.reduce<Record<string, number>>((acc, task) => {
-        acc[task.status] = (acc[task.status] ?? 0) + 1;
-        return acc;
-      }, {}),
-    [allTasks],
-  );
   const isBrowserPreviewMode = projectRoot === 'Browser preview mode';
-  const selectedWorkspaceLabel = selectedProject?.name ?? 'Global Project View';
+  const selectedWorkspaceLabel = selectedProject?.name ?? 'All Projects';
   const selectedWorkspaceStatus = selectedProject
     ? selectedProject.isLinked
-      ? 'Linked and dispatchable'
-      : 'Discovered only'
-    : 'Cross-project control surface';
+      ? 'Linked repository'
+      : 'Discovered repository'
+    : 'Cross-project task board';
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+  }, [themeMode]);
 
   useEffect(() => {
     if (isBootstrapped || projects.length > 0) {
@@ -166,7 +180,9 @@ export function App() {
         );
         setBootstrapped(true);
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : String(error));
+        const nextError = error instanceof Error ? error.message : String(error);
+        setErrorMessage(nextError);
+        message.error(nextError);
       } finally {
         setLoading(false);
       }
@@ -180,6 +196,7 @@ export function App() {
   }, [
     hydrateProjects,
     isBootstrapped,
+    message,
     projects.length,
     setAvailableCliTools,
     setBootstrapped,
@@ -245,6 +262,39 @@ export function App() {
     };
   }, [appendTaskLog, selectedTask]);
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        setCreateTaskOpen(true);
+      }
+
+      if (event.key === 'Escape') {
+        if (diffMode) {
+          setDiffMode(false);
+          return;
+        }
+
+        if (createTaskOpen) {
+          setCreateTaskOpen(false);
+          return;
+        }
+
+        if (onboardingOpen) {
+          setOnboardingOpen(false);
+          return;
+        }
+
+        if (detailPanelOpen) {
+          setDetailPanelOpen(false);
+        }
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [createTaskOpen, detailPanelOpen, diffMode, onboardingOpen, setCreateTaskOpen, setDetailPanelOpen, setDiffMode]);
+
   const handleRegisterProject = async (repositoryPath: string) => {
     setRegistrationError(null);
     setIsRegisteringProject(true);
@@ -258,242 +308,381 @@ export function App() {
       setTasks(project.id, projectTasks);
       setProjectSettings(project.id, config);
       selectProject(project.id);
+      setDetailPanelOpen(true);
+      setActivePanel('settings');
+      setOnboardingOpen(false);
+      message.success('Repository linked');
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setRegistrationError(message);
-      throw new Error(message);
+      const nextError = error instanceof Error ? error.message : String(error);
+      setRegistrationError(nextError);
+      setErrorMessage(nextError);
+      message.error(nextError);
+      throw new Error(nextError);
     } finally {
       setIsRegisteringProject(false);
     }
   };
 
+  const handleSelectTask = (taskId: string) => {
+    selectTask(taskId);
+    setActivePanel('overview');
+    setDetailPanelOpen(true);
+  };
+
   return (
-    <div className="app-shell">
+    <div className={detailPanelOpen ? 'app-shell app-shell--detail-open' : 'app-shell'}>
       <ProjectSidebar
+        collapsed={sidebarCollapsed}
         currentProjectId={currentProjectId}
-        onSelectProject={selectProject}
+        onOpenOnboarding={() => setOnboardingOpen(true)}
+        onOpenSettings={() => {
+          setActivePanel('settings');
+          setDetailPanelOpen(true);
+        }}
+        onSelectProject={(projectId) => {
+          selectProject(projectId);
+          setDiffMode(false);
+        }}
+        onToggleCollapsed={() => setSidebarCollapsed(!sidebarCollapsed)}
+        onToggleTheme={toggleTheme}
         projectTaskStats={projectTaskStats}
         projects={projects}
+        promptCount={promptCount}
+        theme={themeMode}
         totalActiveTaskCount={activeTaskCount}
         totalTaskCount={allTasks.length}
       />
 
-      <main className="workspace">
-        <section className="workspace-frame">
-          <header className="workspace-header command-deck">
-            <div className="workspace-header__main">
-              <div className="workspace-header__copy">
-                <p className="eyebrow">{selectedWorkspaceLabel.toUpperCase()}</p>
-                <h1>Agent Kanban</h1>
-                <h2>Command Deck</h2>
-                <p className="hero-copy">
-                  A control-room Kanban for repository-linked agents: dispatch work, watch execution lanes,
-                  surface guardrail risk, and close review loops without falling back to a terminal wall.
-                </p>
-              </div>
+      <main className="workspace-shell">
+        <header className="workspace-topbar">
+          <div className="workspace-topbar__title">
+            <span className="workspace-title__eyebrow">AI Task Board</span>
+            <h1>{selectedWorkspaceLabel}</h1>
+            <p>{selectedWorkspaceStatus}</p>
+          </div>
 
-              <div className="workspace-toolbar">
-                <div className="workspace-toolbar__actions">
-                  <button
-                    className="ghost-button"
-                    onClick={() => document.getElementById('dispatch-studio')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                    type="button"
-                  >
-                    + Add New
-                  </button>
-                  <button className="accent-button" onClick={() => setActivePanel('details')} type="button">
-                    AI Insights
-                  </button>
-                </div>
-                <label className="search-shell" aria-label="Search tasks">
-                  <span>Search tasks, branches, repos</span>
-                  <input readOnly value="" />
-                </label>
-              </div>
+          <div className="workspace-topbar__actions">
+            <label className="workspace-search" aria-label="Search tasks">
+              <Search size={16} />
+              <input placeholder="Search tasks, branches, files" type="text" />
+            </label>
+            <button className="secondary-button" onClick={() => setOnboardingOpen(true)} type="button">
+              <FolderPlus size={16} />
+              <span>Link Repo</span>
+            </button>
+            <button className="primary-button" onClick={() => setCreateTaskOpen(true)} type="button">
+              <Plus size={16} />
+              <span>New Task</span>
+            </button>
+          </div>
+        </header>
+
+        <section className="workspace-metrics">
+          <article className="metric-card">
+            <span>Running</span>
+            <strong>{activeTaskCount}</strong>
+            <p>Active agents across linked repositories.</p>
+          </article>
+          <article className="metric-card">
+            <span>Awaiting Review</span>
+            <strong>{awaitingAcceptanceCount}</strong>
+            <p>Tasks ready for approval or rejection.</p>
+          </article>
+          <article className="metric-card">
+            <span>Detected CLI</span>
+            <strong>{availableCliTools.length}</strong>
+            <p>Available runtimes detected from PATH.</p>
+          </article>
+          <article className="metric-card metric-card--accent">
+            <span>Workspace Root</span>
+            <strong>{linkedProjectCount}</strong>
+            <p>{projectRoot || 'Waiting for runtime root.'}</p>
+          </article>
+        </section>
+
+        {errorMessage ? (
+          <div className="inline-alert">
+            <BellDot size={16} />
+            <span>{errorMessage}</span>
+          </div>
+        ) : null}
+
+        <section className="workspace-content">
+          {isLoading ? (
+            <div className="loading-panel">
+              <Skeleton active paragraph={{ rows: 10 }} title />
             </div>
-
-            <div className="workspace-glance">
-              <div className="workspace-glance__item">
-                <span className="metric-label">Workspace status</span>
-                <strong>{selectedWorkspaceStatus}</strong>
-              </div>
-              <div className="workspace-glance__item">
-                <span className="metric-label">Linked repos</span>
-                <strong>{linkedProjectCount}</strong>
-              </div>
-              <div className="workspace-glance__item">
-                <span className="metric-label">CLI tools</span>
-                <strong>{availableCliTools.length}</strong>
-              </div>
-              <div className="workspace-glance__item">
-                <span className="metric-label">Open execution</span>
-                <strong>{activeTaskCount}</strong>
-              </div>
+          ) : projects.length === 0 ? (
+            <div className="workspace-empty">
+              <ProjectOnboardingPanel
+                isRegistering={isRegisteringProject}
+                linkedProjectCount={linkedProjectCount}
+                onRegisterProject={handleRegisterProject}
+                previewMode={isBrowserPreviewMode}
+                projectRoot={projectRoot}
+                registrationError={registrationError}
+              />
             </div>
-          </header>
+          ) : diffMode ? (
+            <TaskDiffWorkspace
+              onApprove={async () => {
+                if (!selectedTask) {
+                  return;
+                }
 
-          <div className="workspace-layout">
-            <div className="workspace-main">
-              <section className="board-panel">
-                <div className="board-panel__header">
-                  <div>
-                    <p className="eyebrow">Execution Board</p>
-                    <h2>{selectedWorkspaceLabel}</h2>
-                    <p className="panel-copy">
-                      Multi-lane task flow with review posture, operator prompts, and runtime context visible at a glance.
-                    </p>
-                  </div>
+                try {
+                  const task = await approveTask(selectedTask.projectId, selectedTask.id);
+                  upsertTask(task);
+                  setDiffMode(false);
+                  message.success('Task approved');
+                } catch (error) {
+                  const nextError = error instanceof Error ? error.message : String(error);
+                  setErrorMessage(nextError);
+                  message.error(nextError);
+                }
+              }}
+              onBack={() => setDiffMode(false)}
+              onReject={async (feedback) => {
+                if (!selectedTask) {
+                  return;
+                }
 
-                  <div className="board-panel__chips">
-                    <span className="ghost-pill">{selectedWorkspaceStatus}</span>
-                    <span className="ghost-pill">{allTasks.length} tracked tasks</span>
-                    <span className="ghost-pill">{awaitingAcceptanceCount} awaiting acceptance</span>
-                  </div>
+                try {
+                  const task = await rejectTask(selectedTask.projectId, selectedTask.id, feedback);
+                  upsertTask(task);
+                  setDiffMode(false);
+                  message.success('Task sent back for revision');
+                } catch (error) {
+                  const nextError = error instanceof Error ? error.message : String(error);
+                  setErrorMessage(nextError);
+                  message.error(nextError);
+                }
+              }}
+              task={selectedTask}
+              theme={themeMode}
+            />
+          ) : (
+            <>
+              <div className="workspace-board-head">
+                <div>
+                  <span className="section-kicker">Board</span>
+                  <h2>{selectedWorkspaceLabel}</h2>
+                  <p>Board updates stream in real time from the Tauri event bus.</p>
                 </div>
-
-                <div className="board-summary">
-                  <div className="board-summary__item">
-                    <span className="detail-label">Selection</span>
-                    <p>{selectedWorkspaceLabel}</p>
-                  </div>
-                  <div className="board-summary__item">
-                    <span className="detail-label">Discovery root</span>
-                    <p>{projectRoot || 'Unset'}</p>
-                  </div>
-                  <div className="board-summary__item">
-                    <span className="detail-label">Remote origin</span>
-                    <p>{selectedProject?.remoteUrl ?? 'Link a repository to activate remote-backed task dispatch.'}</p>
-                  </div>
-                  <div className="board-summary__item">
-                    <span className="detail-label">Board posture</span>
-                    <p>
-                      {isBrowserPreviewMode
-                        ? 'Browser preview renders the shell, but repository validation and execution still require the desktop runtime.'
-                        : 'Tasks execute in copied workspaces and guarded review flows so the source tree stays safe.'}
-                    </p>
-                  </div>
+                <div className="workspace-board-head__chips">
+                  <span className="count-pill">{allTasks.length} tasks</span>
+                  <span className="count-pill">{promptCount} waiting input</span>
+                  <span className="count-pill">{linkedProjectCount} linked repos</span>
                 </div>
+              </div>
 
-                {isLoading ? <p className="empty-state">Loading projects and task metadata...</p> : null}
-                {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
-
+              {tasks.length === 0 && currentProjectId !== 'all' ? (
+                <div className="workspace-empty workspace-empty--compact">
+                  <Empty description="This project has no tasks yet." image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                </div>
+              ) : (
                 <TaskBoard
-                  onSelectTask={selectTask}
+                  onCreateTask={() => setCreateTaskOpen(true)}
+                  onSelectTask={handleSelectTask}
                   projectNameById={projectNameById}
                   selectedTaskId={selectedTaskId}
                   showProjectName={currentProjectId === 'all'}
                   tasks={tasks}
                 />
-
-                <section className="ops-dock" id="dispatch-studio">
-                  <div className="ops-dock__header">
-                    <div>
-                      <p className="eyebrow">Quick Actions</p>
-                      <h2>Quick Actions</h2>
-                      <p className="panel-copy">
-                        Dispatch Studio: link repositories, configure runtime inputs, and launch task runs from the same workflow rail.
-                      </p>
-                    </div>
-                    <div className="board-panel__chips">
-                      <span className="ghost-pill">{promptCount} queued prompts</span>
-                      <span className="ghost-pill">{availableCliTools.length || 0} CLI profiles</span>
-                    </div>
-                  </div>
-
-                  <div className="ops-dock__grid">
-                    <ProjectOnboardingPanel
-                      isRegistering={isRegisteringProject}
-                      linkedProjectCount={linkedProjectCount}
-                      onRegisterProject={handleRegisterProject}
-                      previewMode={isBrowserPreviewMode}
-                      projectRoot={projectRoot}
-                      registrationError={registrationError}
-                    />
-
-                    <CreateTaskComposer
-                      availableCliTools={availableCliTools}
-                      onCreateTask={async (input) => {
-                        const task = await createTask(input);
-                        upsertTask(task);
-                        selectProject(task.projectId);
-                        selectTask(task.id);
-                      }}
-                      selectedProject={selectedProject}
-                    />
-                  </div>
-                </section>
-              </section>
-            </div>
-
-            <TaskDetailsPanel
-              activePanel={activePanel}
-              awaitingAcceptanceCount={awaitingAcceptanceCount}
-              logs={logs}
-              onApproveTask={async () => {
-                if (!selectedTask) {
-                  return;
-                }
-                const task = await approveTask(selectedTask.projectId, selectedTask.id);
-                upsertTask(task);
-              }}
-              onRejectTask={async () => {
-                if (!selectedTask) {
-                  return;
-                }
-                const feedback = window.prompt('Why are you rejecting this task?', 'Please revise the implementation.') ?? '';
-                if (!feedback.trim()) {
-                  return;
-                }
-                const task = await rejectTask(selectedTask.projectId, selectedTask.id, feedback);
-                upsertTask(task);
-              }}
-              onRetryTask={async () => {
-                if (!selectedTask) {
-                  return;
-                }
-                const task = await retryTask(selectedTask.projectId, selectedTask.id);
-                upsertTask(task);
-              }}
-              onSaveSettings={async (config) => {
-                if (!settingsProject) {
-                  return;
-                }
-                const saved = await saveHarnessConfig(settingsProject.id, config);
-                setProjectSettings(settingsProject.id, saved);
-              }}
-              onSelectPanel={setActivePanel}
-              onStartTask={async () => {
-                if (!selectedTask) {
-                  return;
-                }
-                await startTask(selectedTask.projectId, selectedTask.id);
-              }}
-              project={inspectedProject}
-              promptCount={promptCount}
-              settings={selectedSettings}
-              task={selectedTask}
-              taskStatusCounts={taskStatusCounts}
-              totalActiveTaskCount={activeTaskCount}
-              totalTaskCount={allTasks.length}
-            />
-          </div>
+              )}
+            </>
+          )}
         </section>
       </main>
 
-      <PromptCard
-        onAnswer={(reply) => {
-          if (!activeQuestion || !selectedTask) {
+      <TaskDetailsPanel
+        activePanel={activePanel}
+        logs={logs}
+        onApproveTask={async () => {
+          if (!selectedTask) {
             return;
           }
-          void answerQuestion(selectedTask.projectId, activeQuestion.taskId, reply).then((task) => {
+
+          try {
+            const task = await approveTask(selectedTask.projectId, selectedTask.id);
+            upsertTask(task);
+            message.success('Task approved');
+          } catch (error) {
+            const nextError = error instanceof Error ? error.message : String(error);
+            setErrorMessage(nextError);
+            message.error(nextError);
+          }
+        }}
+        onClose={() => setDetailPanelOpen(false)}
+        onOpenDiff={() => setDiffMode(true)}
+        onRejectTask={async (feedback) => {
+          if (!selectedTask) {
+            return;
+          }
+
+          try {
+            const task = await rejectTask(selectedTask.projectId, selectedTask.id, feedback);
+            upsertTask(task);
+            message.success('Task sent back for revision');
+          } catch (error) {
+            const nextError = error instanceof Error ? error.message : String(error);
+            setErrorMessage(nextError);
+            message.error(nextError);
+          }
+        }}
+        onRetryTask={async () => {
+          if (!selectedTask) {
+            return;
+          }
+
+          try {
+            const task = await retryTask(selectedTask.projectId, selectedTask.id);
+            upsertTask(task);
+            message.success('Task retried');
+          } catch (error) {
+            const nextError = error instanceof Error ? error.message : String(error);
+            setErrorMessage(nextError);
+            message.error(nextError);
+          }
+        }}
+        onSaveSettings={async (config) => {
+          if (!inspectedProject) {
+            return;
+          }
+
+          try {
+            const saved = await saveHarnessConfig(inspectedProject.id, config);
+            setProjectSettings(inspectedProject.id, saved);
+            message.success('Project settings saved');
+          } catch (error) {
+            const nextError = error instanceof Error ? error.message : String(error);
+            setErrorMessage(nextError);
+            message.error(nextError);
+          }
+        }}
+        onSelectPanel={setActivePanel}
+        onStartTask={async () => {
+          if (!selectedTask) {
+            return;
+          }
+
+          try {
+            await startTask(selectedTask.projectId, selectedTask.id);
+            message.success('Task started');
+          } catch (error) {
+            const nextError = error instanceof Error ? error.message : String(error);
+            setErrorMessage(nextError);
+            message.error(nextError);
+          }
+        }}
+        open={detailPanelOpen}
+        project={inspectedProject}
+        settings={selectedSettings}
+        task={selectedTask}
+        theme={themeMode}
+      />
+
+      <CreateTaskComposer
+        availableCliTools={availableCliTools}
+        currentProjectId={currentProjectId}
+        onClose={() => setCreateTaskOpen(false)}
+        onCreateTask={async (input) => {
+          try {
+            const task = await createTask(input);
+            upsertTask(task);
+            selectProject(task.projectId);
+            selectTask(task.id);
+            setActivePanel('overview');
+            setDetailPanelOpen(true);
+
+            try {
+              await startTask(task.projectId, task.id);
+              message.success('Task created and started');
+            } catch (startError) {
+              const nextError = startError instanceof Error ? startError.message : String(startError);
+              setErrorMessage(nextError);
+              message.warning(`Task created, but start failed: ${nextError}`);
+            }
+          } catch (error) {
+            const nextError = error instanceof Error ? error.message : String(error);
+            setErrorMessage(nextError);
+            message.error(nextError);
+          }
+        }}
+        open={createTaskOpen}
+        projects={projects}
+      />
+
+      <Drawer
+        className="onboarding-drawer"
+        closable
+        onClose={() => setOnboardingOpen(false)}
+        open={onboardingOpen}
+        placement="right"
+        title="Link Repository"
+      >
+        <ProjectOnboardingPanel
+          isRegistering={isRegisteringProject}
+          linkedProjectCount={linkedProjectCount}
+          onRegisterProject={handleRegisterProject}
+          previewMode={isBrowserPreviewMode}
+          projectRoot={projectRoot}
+          registrationError={registrationError}
+        />
+      </Drawer>
+
+      <PromptCard
+        onAnswer={(reply) => {
+          if (!activeQuestion) {
+            return;
+          }
+
+          const questionTask = taskById[activeQuestion.taskId];
+          if (!questionTask) {
+            return;
+          }
+
+          void answerQuestion(questionTask.projectId, activeQuestion.taskId, reply).then((task) => {
             upsertTask(task);
             dismissQuestion();
+            message.success('Answer submitted');
           });
         }}
         onDismiss={dismissQuestion}
         question={activeQuestion}
       />
+
+      {!diffMode ? (
+        <button className="floating-new-task" onClick={() => setCreateTaskOpen(true)} type="button">
+          <Plus size={18} />
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+export function App() {
+  const themeMode = useAppStore((state) => state.theme);
+  const isDark = themeMode === 'dark';
+
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        token: {
+          colorPrimary: '#7C3AED',
+          borderRadius: 8,
+          colorBgBase: isDark ? '#0F0F12' : '#F8F9FA',
+          colorBgContainer: isDark ? '#1A1B1E' : '#FFFFFF',
+          colorBorder: isDark ? '#2C2F36' : '#E5E7EB',
+          colorText: isDark ? '#F3F4F6' : '#1F2937',
+        },
+      }}
+    >
+      <AntdApp>
+        <AppShell />
+      </AntdApp>
+    </ConfigProvider>
   );
 }
 

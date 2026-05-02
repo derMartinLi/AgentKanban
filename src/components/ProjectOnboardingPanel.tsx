@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { FolderPlus, GitBranch, Link2 } from 'lucide-react';
 
 type ProjectOnboardingPanelProps = {
   isRegistering: boolean;
@@ -20,25 +21,30 @@ export function ProjectOnboardingPanel({
   const [repositoryPath, setRepositoryPath] = useState('');
 
   return (
-    <section className="panel onboarding-panel">
-      <div className="panel-heading">
-        <p className="eyebrow">Repository Onboarding</p>
-        <h2>{previewMode ? 'Preview Repository Card' : 'Link Repository'}</h2>
-        <p className="panel-copy">
-          {previewMode
-            ? 'Browser preview mode cannot validate Git metadata. You can stage the UI here, but only the desktop app can create linked, dispatchable projects.'
-            : 'Register the repository once, then dispatch tasks into isolated copies, dedicated branches, and the existing review and acceptance flow.'}
+    <section className="setup-panel">
+      <div className="setup-panel__header">
+        <span className="section-kicker">Link Repository</span>
+        <h2>{previewMode ? 'Preview repository onboarding' : 'Attach a git workspace'}</h2>
+        <p>
+          Every project in Agent Kanban is backed by a git repository so tasks can copy the repo,
+          branch safely, and flow through review and acceptance.
         </p>
       </div>
 
-      <div className="metric-row">
-        <div className="metric-tile">
-          <span className="metric-label">Linked repos</span>
-          <strong>{linkedProjectCount ?? 0}</strong>
+      <div className="setup-panel__stats">
+        <div className="setup-panel__stat">
+          <FolderPlus size={16} />
+          <div>
+            <span>Linked repos</span>
+            <strong>{linkedProjectCount ?? 0}</strong>
+          </div>
         </div>
-        <div className="metric-tile metric-tile--wide">
-          <span className="metric-label">Discovery root</span>
-          <strong>{projectRoot || 'Set by desktop runtime'}</strong>
+        <div className="setup-panel__stat">
+          <GitBranch size={16} />
+          <div>
+            <span>Discovery root</span>
+            <strong>{projectRoot || 'Set by desktop runtime'}</strong>
+          </div>
         </div>
       </div>
 
@@ -49,19 +55,15 @@ export function ProjectOnboardingPanel({
           if (!repositoryPath.trim()) {
             return;
           }
+
           try {
             await onRegisterProject(repositoryPath.trim());
             setRepositoryPath('');
           } catch {
-            // Keep the typed path so the user can correct a typo instead of re-entering it.
+            // Keep the typed path visible for quick fixes.
           }
         }}
       >
-        <p className="empty-state">
-          Every project in Agent Kanban is backed by a git repository so tasks can copy the repo,
-          branch safely, and flow through review and acceptance.
-        </p>
-
         <label className="field">
           <span>Git repository path</span>
           <input
@@ -71,14 +73,25 @@ export function ProjectOnboardingPanel({
           />
         </label>
 
+        {previewMode ? (
+          <p className="inline-note">
+            Browser preview can stage the UI, but only the desktop runtime can validate git metadata.
+          </p>
+        ) : (
+          <p className="inline-note">
+            We verify branch and remote metadata up front so later task dispatch stays predictable.
+          </p>
+        )}
+
         {registrationError ? <p className="error-text">{registrationError}</p> : null}
 
         <button
-          className="primary-button"
+          className="primary-button primary-button--wide"
           disabled={isRegistering || !repositoryPath.trim()}
           type="submit"
         >
-          {isRegistering ? 'Linking...' : previewMode ? 'Add Preview Entry' : 'Link Repository'}
+          <Link2 size={16} />
+          <span>{isRegistering ? 'Linking...' : previewMode ? 'Add Preview Entry' : 'Link Repository'}</span>
         </button>
       </form>
     </section>

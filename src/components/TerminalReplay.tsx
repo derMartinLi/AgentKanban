@@ -1,14 +1,44 @@
 import { useEffect, useRef } from 'react';
-import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import type { TaskLogEntry } from '../lib/types';
+import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import type { TaskLogEntry } from '../lib/types';
+import type { ThemeMode } from '../store/useAppStore';
 
 type TerminalReplayProps = {
   logs: TaskLogEntry[];
+  theme: ThemeMode;
 };
 
-export function TerminalReplay({ logs }: TerminalReplayProps) {
+function getTerminalTheme(theme: ThemeMode) {
+  if (theme === 'dark') {
+    return {
+      background: '#1E1E1E',
+      foreground: '#E6EAF2',
+      cursor: '#7C3AED',
+      black: '#0F1115',
+      brightBlack: '#525866',
+      green: '#51CF66',
+      red: '#FF6B6B',
+      yellow: '#FCC419',
+      blue: '#339AF0',
+    };
+  }
+
+  return {
+    background: '#F7F7FB',
+    foreground: '#1F2937',
+    cursor: '#7C3AED',
+    black: '#2C313A',
+    brightBlack: '#748092',
+    green: '#2F9E44',
+    red: '#E03131',
+    yellow: '#E67700',
+    blue: '#1C7ED6',
+  };
+}
+
+export function TerminalReplay({ logs, theme }: TerminalReplayProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
 
@@ -20,12 +50,9 @@ export function TerminalReplay({ logs }: TerminalReplayProps) {
     const terminal = new Terminal({
       convertEol: true,
       disableStdin: true,
-      fontFamily: 'Geist Mono, Cascadia Mono, Consolas, monospace',
+      fontFamily: 'Cascadia Code, Fira Code, Consolas, monospace',
       fontSize: 12,
-      theme: {
-        background: '#0d0d0d',
-        foreground: '#f5f5f5',
-      },
+      theme: getTerminalTheme(theme),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -33,15 +60,20 @@ export function TerminalReplay({ logs }: TerminalReplayProps) {
     fitAddon.fit();
     terminalRef.current = terminal;
 
-    const observer = new ResizeObserver(() => fitAddon.fit());
-    observer.observe(hostRef.current);
+    const observer = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          fitAddon.fit();
+        });
+
+    observer?.observe(hostRef.current);
 
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       terminal.dispose();
       terminalRef.current = null;
     };
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     if (!terminalRef.current) {

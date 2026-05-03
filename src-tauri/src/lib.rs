@@ -1,5 +1,6 @@
 pub mod domain;
 pub mod commands;
+pub mod events;
 pub mod git_ops;
 pub mod harness;
 pub mod storage;
@@ -25,6 +26,8 @@ pub fn run() {
       commands::default_projects_root,
       commands::detect_cli_tools,
       commands::find_projects,
+      commands::list_registered_projects,
+      commands::discover_projects,
       commands::register_project,
       commands::list_tasks,
       commands::create_task,

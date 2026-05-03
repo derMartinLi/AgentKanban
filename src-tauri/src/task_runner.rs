@@ -1,18 +1,18 @@
 use crate::{
     domain::{timestamp_now, HarnessConfig, Project, Task, TaskLogEntry, TaskQuestion, TaskStatus},
+    events::TaskEventSink,
     git_ops,
     harness::build_harness_payload,
     storage::Storage,
 };
 use anyhow::{anyhow, Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
 };
-use tauri::{AppHandle, Emitter};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{ChildStdin, Command},
@@ -20,66 +20,6 @@ use tokio::{
     time::{sleep, Duration},
 };
 use uuid::Uuid;
-
-// ---------------------------------------------------------------------------
-// Event sink trait – decouples task-runner logic from Tauri's AppHandle.
-// ---------------------------------------------------------------------------
-
-pub trait TaskEventSink: Clone + Send + Sync + 'static {
-    fn task_updated(&self, project_id: &str, task: &Task);
-    fn task_log(&self, project_id: &str, task_id: &str, entry: &TaskLogEntry);
-}
-
-// ---------------------------------------------------------------------------
-// Tauri-backed event sink
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct TauriEventSink {
-    app: AppHandle,
-}
-
-impl TauriEventSink {
-    pub fn new(app: &AppHandle) -> Self {
-        Self { app: app.clone() }
-    }
-}
-
-impl TaskEventSink for TauriEventSink {
-    fn task_updated(&self, project_id: &str, task: &Task) {
-        let _ = self.app.emit(
-            "task-updated",
-            TaskUpdatedPayload {
-                project_id: project_id.to_string(),
-                task: task.clone(),
-            },
-        );
-    }
-
-    fn task_log(&self, project_id: &str, task_id: &str, entry: &TaskLogEntry) {
-        let _ = self.app.emit(
-            "task-log",
-            TaskLogPayload {
-                project_id: project_id.to_string(),
-                task_id: task_id.to_string(),
-                entry: entry.clone(),
-            },
-        );
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct TaskUpdatedPayload {
-    project_id: String,
-    task: Task,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct TaskLogPayload {
-    project_id: String,
-    task_id: String,
-    entry: TaskLogEntry,
-}
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -91,6 +31,8 @@ pub struct AppState {
 struct RuntimeState {
     active_tasks: Mutex<HashSet<String>>,
     stdin_handles: Mutex<HashMap<String, Arc<Mutex<ChildStdin>>>>,
+    process_ids: Mutex<HashMap<String, u32>>,
+    question_tokens: Mutex<HashMap<String, String>>,
     max_concurrency: Mutex<usize>,
 }
 
@@ -109,14 +51,20 @@ pub struct CreateTaskInput {
 
 impl AppState {
     pub fn new() -> Result<Self> {
-        Ok(Self {
-            storage: Storage::default()?,
+        Ok(Self::with_storage(Storage::default()?))
+    }
+
+    fn with_storage(storage: Storage) -> Self {
+        Self {
+            storage,
             runtime: Arc::new(RuntimeState {
                 active_tasks: Mutex::new(HashSet::new()),
                 stdin_handles: Mutex::new(HashMap::new()),
+                process_ids: Mutex::new(HashMap::new()),
+                question_tokens: Mutex::new(HashMap::new()),
                 max_concurrency: Mutex::new(2),
             }),
-        })
+        }
     }
 
     pub fn default_projects_root(&self) -> String {
@@ -142,7 +90,7 @@ impl AppState {
         found
     }
 
-    pub fn find_projects(&self, _root_dir: &Path) -> Result<Vec<Project>> {
+    pub fn list_registered_projects(&self) -> Result<Vec<Project>> {
         let mut projects = self.storage.load_registered_projects()?;
         for project in &mut projects {
             project.is_linked = true;
@@ -157,6 +105,32 @@ impl AppState {
         }
 
         projects.retain(|project| project.is_linked);
+        projects.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(projects)
+    }
+
+    pub fn find_projects(&self, _root_dir: &Path) -> Result<Vec<Project>> {
+        self.list_registered_projects()
+    }
+
+    pub fn discover_projects(&self, root_dir: &Path) -> Result<Vec<Project>> {
+        let registered_paths = self
+            .storage
+            .load_registered_projects()?
+            .into_iter()
+            .map(|project| normalize_project_path(&project.path))
+            .collect::<HashSet<_>>();
+
+        let mut projects = self.storage.discover_projects(root_dir)?;
+        projects.retain(|project| !registered_paths.contains(&normalize_project_path(&project.path)));
+
+        for project in &mut projects {
+            let project_path = Path::new(&project.path);
+            project.default_branch = git_ops::default_branch(project_path).unwrap_or_else(|_| "main".into());
+            project.remote_url = git_ops::origin_remote_url(project_path).ok();
+            project.is_linked = false;
+        }
+
         projects.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(projects)
     }
@@ -278,6 +252,7 @@ impl AppState {
             stdin.write_all(b"\n").await?;
             stdin.flush().await?;
         }
+        self.runtime.question_tokens.lock().await.remove(&key);
 
         let mut task = self.get_task(&project_id, &task_id)?;
         task.pending_question = None;
@@ -308,6 +283,9 @@ impl AppState {
             &task.branch_name,
             &task.base_branch,
         )?;
+        if let Some(message) = cleanup_workspace_after_completion(&mut task) {
+            self.append_system_log(&sink, &project_id, &task.id, message)?;
+        }
         task = task.transition(TaskStatus::Completed)?;
         self.save_task(&project_id, task.clone())?;
         self.emit_task_update(&sink, &project_id, &task);
@@ -322,6 +300,8 @@ impl AppState {
 
         self.runtime.active_tasks.lock().await.remove(&key);
         self.runtime.stdin_handles.lock().await.remove(&key);
+        self.runtime.process_ids.lock().await.remove(&key);
+        self.runtime.question_tokens.lock().await.remove(&key);
 
         if let Err(error) = result {
             let _ = self.fail_task(&sink, &project_id, &task_id, error.to_string());
@@ -358,7 +338,15 @@ impl AppState {
 
             let payload = build_harness_payload(Path::new(&source_path), &executing_task, &config)?;
             let exit_ok = self
-                .run_cli_process(sink, project_id, &executing_task, &workspace_path, payload.prompt, payload.env_vars)
+                .run_cli_process(
+                    sink,
+                    project_id,
+                    &executing_task,
+                    &workspace_path,
+                    payload.prompt,
+                    payload.env_vars,
+                    config.question_timeout_secs,
+                )
                 .await?;
 
             if !exit_ok {
@@ -435,6 +423,7 @@ impl AppState {
         workspace_path: &Path,
         prompt: String,
         env_vars: HashMap<String, String>,
+        question_timeout_secs: u64,
     ) -> Result<bool> {
         let mut command = Command::new(&task.cli_command);
         command
@@ -448,6 +437,10 @@ impl AppState {
             .stderr(Stdio::piped());
 
         let mut child = command.spawn().with_context(|| format!("failed to launch {}", task.cli_command))?;
+        let key = runtime_key(project_id, &task.id);
+        if let Some(process_id) = child.id() {
+            self.runtime.process_ids.lock().await.insert(key.clone(), process_id);
+        }
         let stdout = child.stdout.take().context("missing stdout pipe")?;
         let stderr = child.stderr.take().context("missing stderr pipe")?;
         let stdin = child.stdin.take().context("missing stdin pipe")?;
@@ -456,7 +449,7 @@ impl AppState {
             .stdin_handles
             .lock()
             .await
-            .insert(runtime_key(project_id, &task.id), Arc::new(Mutex::new(stdin)));
+            .insert(key.clone(), Arc::new(Mutex::new(stdin)));
 
         let stdout_task = tokio::spawn(Self::stream_output(
             self.clone(),
@@ -465,6 +458,7 @@ impl AppState {
             task.id.clone(),
             stdout,
             "stdout".into(),
+            question_timeout_secs,
         ));
         let stderr_task = tokio::spawn(Self::stream_output(
             self.clone(),
@@ -473,15 +467,20 @@ impl AppState {
             task.id.clone(),
             stderr,
             "stderr".into(),
+            question_timeout_secs,
         ));
 
         let status = child.wait().await?;
+        self.runtime.process_ids.lock().await.remove(&key);
         stdout_task.await??;
         stderr_task.await??;
 
         if !status.success() {
-            let message = format!("command exited with code {:?}", status.code());
-            self.fail_task(sink, project_id, &task.id, message)?;
+            let latest = self.get_task(project_id, &task.id)?;
+            if latest.status != TaskStatus::Failed {
+                let message = format!("command exited with code {:?}", status.code());
+                self.fail_task(sink, project_id, &task.id, message)?;
+            }
             return Ok(false);
         }
 
@@ -495,6 +494,7 @@ impl AppState {
         task_id: String,
         reader: R,
         stream: String,
+        question_timeout_secs: u64,
     ) -> Result<()>
     where
         R: tokio::io::AsyncRead + Unpin,
@@ -503,6 +503,8 @@ impl AppState {
         while let Some(line) = lines.next_line().await? {
             if let Some(payload) = line.strip_prefix("___QUESTION___") {
                 if let Ok(question) = serde_json::from_str::<IncomingQuestion>(payload) {
+                    let key = runtime_key(&project_id, &task_id);
+                    let token = Uuid::new_v4().to_string();
                     let mut task = state.get_task(&project_id, &task_id)?;
                     task.pending_question = Some(TaskQuestion {
                         task_id: task_id.clone(),
@@ -512,7 +514,15 @@ impl AppState {
                     });
                     task = task.transition(TaskStatus::WaitingForInput)?;
                     state.save_task(&project_id, task.clone())?;
+                    state.runtime.question_tokens.lock().await.insert(key, token.clone());
                     state.emit_task_update(&sink, &project_id, &task);
+                    state.schedule_question_timeout(
+                        sink.clone(),
+                        project_id.clone(),
+                        task_id.clone(),
+                        token,
+                        question_timeout_secs,
+                    );
                     continue;
                 }
             }
@@ -613,6 +623,73 @@ impl AppState {
         Ok(())
     }
 
+    fn schedule_question_timeout(
+        &self,
+        sink: impl TaskEventSink,
+        project_id: String,
+        task_id: String,
+        token: String,
+        timeout_secs: u64,
+    ) {
+        let state = self.clone();
+        tokio::spawn(async move {
+            let _ = state
+                .handle_question_timeout(sink, project_id, task_id, token, timeout_secs)
+                .await;
+        });
+    }
+
+    async fn handle_question_timeout(
+        &self,
+        sink: impl TaskEventSink,
+        project_id: String,
+        task_id: String,
+        token: String,
+        timeout_secs: u64,
+    ) -> Result<()> {
+        sleep(Duration::from_secs(timeout_secs)).await;
+
+        let key = runtime_key(&project_id, &task_id);
+        let active_token = self.runtime.question_tokens.lock().await.get(&key).cloned();
+        if active_token.as_deref() != Some(token.as_str()) {
+            return Ok(());
+        }
+
+        let task = self.get_task(&project_id, &task_id)?;
+        if task.status != TaskStatus::WaitingForInput || task.pending_question.is_none() {
+            self.runtime.question_tokens.lock().await.remove(&key);
+            return Ok(());
+        }
+
+        let message = format!("Question timed out after {timeout_secs} seconds");
+        self.append_system_log(&sink, &project_id, &task_id, message.clone())?;
+        if let Err(error) = self.kill_tracked_process(&key).await {
+            self.append_system_log(&sink, &project_id, &task_id, format!("Failed to terminate timed out process: {error}"))?;
+        }
+        self.runtime.question_tokens.lock().await.remove(&key);
+        self.fail_task(&sink, &project_id, &task_id, message)?;
+        Ok(())
+    }
+
+    async fn kill_tracked_process(&self, key: &str) -> Result<()> {
+        let process_id = self.runtime.process_ids.lock().await.remove(key);
+        if let Some(process_id) = process_id {
+            kill_process(process_id).await?;
+        }
+        Ok(())
+    }
+
+    fn append_system_log(&self, sink: &impl TaskEventSink, project_id: &str, task_id: &str, message: String) -> Result<()> {
+        let entry = TaskLogEntry {
+            timestamp: timestamp_now(),
+            stream: "system".into(),
+            message,
+        };
+        self.storage.append_log(task_id, &entry)?;
+        sink.task_log(project_id, task_id, &entry);
+        Ok(())
+    }
+
     fn save_task(&self, project_id: &str, task: Task) -> Result<()> {
         let mut tasks = self.storage.load_tasks(project_id)?;
         if let Some(existing) = tasks.iter_mut().find(|entry| entry.id == task.id) {
@@ -643,6 +720,29 @@ enum GuardrailOutcome {
 struct CommandOutput {
     success: bool,
     output: String,
+}
+
+async fn kill_process(process_id: u32) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    let output = Command::new("taskkill")
+        .args(["/PID", &process_id.to_string(), "/T", "/F"])
+        .output()
+        .await?;
+
+    #[cfg(not(target_os = "windows"))]
+    let output = Command::new("kill")
+        .args(["-9", &process_id.to_string()])
+        .output()
+        .await?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        Err(anyhow!("failed to terminate process {process_id}: {detail}"))
+    }
 }
 
 async fn run_shell_command(cwd: &Path, command_line: &str, env_vars: &HashMap<String, String>) -> Result<CommandOutput> {
@@ -758,4 +858,212 @@ fn project_id_from_path(project_path: &Path) -> String {
 
 fn normalize_project_path(value: &str) -> String {
     value.replace('\\', "/").to_ascii_lowercase()
+}
+
+fn cleanup_workspace_after_completion(task: &mut Task) -> Option<String> {
+    let workspace_path = task.workspace_path.clone()?;
+    match std::fs::remove_dir_all(&workspace_path) {
+        Ok(()) => {
+            task.workspace_path = None;
+            None
+        }
+        Err(error) => Some(format!("Workspace cleanup failed for {workspace_path}: {error}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, sync::{Arc, Mutex as StdMutex}};
+    use tokio::io::{duplex, AsyncWriteExt};
+
+    #[derive(Clone, Default)]
+    struct MockSink {
+        updates: Arc<StdMutex<Vec<(String, Task)>>>,
+        logs: Arc<StdMutex<Vec<(String, String, TaskLogEntry)>>>,
+    }
+
+    impl TaskEventSink for MockSink {
+        fn task_updated(&self, project_id: &str, task: &Task) {
+            self.updates
+                .lock()
+                .expect("updates mutex poisoned")
+                .push((project_id.to_string(), task.clone()));
+        }
+
+        fn task_log(&self, project_id: &str, task_id: &str, entry: &TaskLogEntry) {
+            self.logs
+                .lock()
+                .expect("logs mutex poisoned")
+                .push((project_id.to_string(), task_id.to_string(), entry.clone()));
+        }
+    }
+
+    fn build_test_state() -> (AppState, PathBuf) {
+        let root = std::env::temp_dir().join(format!("agentkanban-task-runner-{}", Uuid::new_v4()));
+        let storage = Storage::new(root.clone()).expect("create test storage");
+        (AppState::with_storage(storage), root)
+    }
+
+    #[tokio::test]
+    async fn stream_output_sets_pending_question_and_emits_update() {
+        let (state, root) = build_test_state();
+        let task = Task::new(
+            "task-1".into(),
+            "project-1".into(),
+            "Review prompt".into(),
+            "Need operator input".into(),
+            "codex".into(),
+            Vec::new(),
+            "main".into(),
+        )
+        .transition(TaskStatus::Executing)
+        .expect("move task into executing state");
+        state
+            .storage
+            .save_tasks("project-1", &[task.clone()])
+            .expect("seed task");
+
+        let sink = MockSink::default();
+        let (mut writer, reader) = duplex(256);
+        let payload = serde_json::json!({ "q": "Need approval", "opts": ["yes", "no"] }).to_string();
+        writer
+            .write_all(format!("___QUESTION___{payload}\n").as_bytes())
+            .await
+            .expect("write question payload");
+        drop(writer);
+
+        AppState::stream_output(
+            state.clone(),
+            sink.clone(),
+            "project-1".into(),
+            task.id.clone(),
+            reader,
+            "stdout".into(),
+            120,
+        )
+        .await
+        .expect("process output");
+
+        let updated = state
+            .get_task("project-1", &task.id)
+            .expect("load updated task");
+
+        assert_eq!(updated.status, TaskStatus::WaitingForInput);
+        assert_eq!(updated.pending_question.as_ref().map(|question| question.q.as_str()), Some("Need approval"));
+        assert_eq!(sink.updates.lock().expect("read updates").len(), 1);
+        assert!(sink.logs.lock().expect("read logs").is_empty());
+
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
+    fn discover_projects_excludes_registered_paths() {
+        let (state, root) = build_test_state();
+        let repos_root = root.join("repos");
+        let alpha = repos_root.join("alpha");
+        let beta = repos_root.join("beta");
+        fs::create_dir_all(alpha.join(".git")).expect("create alpha repo");
+        fs::create_dir_all(beta.join(".git")).expect("create beta repo");
+
+        state
+            .storage
+            .save_registered_projects(&[Project {
+                id: "alpha".into(),
+                name: "Alpha".into(),
+                path: alpha.to_string_lossy().to_string(),
+                default_branch: "main".into(),
+                is_linked: true,
+                remote_url: Some("git@example.com:alpha.git".into()),
+            }])
+            .expect("save registered project");
+
+        let discovered = state.discover_projects(&repos_root).expect("discover projects");
+
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].name, "beta");
+
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[tokio::test]
+    async fn question_timeout_marks_task_failed_and_logs_system_message() {
+        let (state, root) = build_test_state();
+        let task = Task::new(
+            "task-timeout".into(),
+            "project-1".into(),
+            "Timeout prompt".into(),
+            "Wait for input".into(),
+            "codex".into(),
+            Vec::new(),
+            "main".into(),
+        )
+        .transition(TaskStatus::Executing)
+        .expect("move task into executing state")
+        .transition(TaskStatus::WaitingForInput)
+        .expect("move task into waiting state");
+
+        let mut waiting_task = task.clone();
+        waiting_task.pending_question = Some(TaskQuestion {
+            task_id: waiting_task.id.clone(),
+            q: "Need approval".into(),
+            opts: vec!["yes".into()],
+            allow_freeform: true,
+        });
+
+        state
+            .storage
+            .save_tasks("project-1", &[waiting_task.clone()])
+            .expect("seed waiting task");
+
+        let key = runtime_key("project-1", &waiting_task.id);
+        state
+            .runtime
+            .question_tokens
+            .lock()
+            .await
+            .insert(key, "token-1".into());
+
+        let sink = MockSink::default();
+        state
+            .handle_question_timeout(sink.clone(), "project-1".into(), waiting_task.id.clone(), "token-1".into(), 0)
+            .await
+            .expect("handle question timeout");
+
+        let failed = state
+            .get_task("project-1", &waiting_task.id)
+            .expect("load failed task");
+        assert_eq!(failed.status, TaskStatus::Failed);
+        assert_eq!(failed.latest_error.as_deref(), Some("Question timed out after 0 seconds"));
+
+        let logs = state.storage.read_logs(&waiting_task.id).expect("read timeout logs");
+        assert!(logs.iter().any(|entry| entry.stream == "system" && entry.message.contains("Question timed out after 0 seconds")));
+        assert!(sink.logs.lock().expect("read logs").iter().any(|(_, _, entry)| entry.stream == "system"));
+
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
+    fn cleanup_workspace_after_completion_removes_directory_and_clears_path() {
+        let workspace_root = std::env::temp_dir().join(format!("agentkanban-workspace-cleanup-{}", Uuid::new_v4()));
+        fs::create_dir_all(&workspace_root).expect("create workspace root");
+        fs::write(workspace_root.join("marker.txt"), "ok").expect("seed workspace file");
+
+        let mut task = Task::new(
+            "task-cleanup".into(),
+            "project-1".into(),
+            "Cleanup workspace".into(),
+            "Cleanup workspace".into(),
+            "codex".into(),
+            Vec::new(),
+            "main".into(),
+        );
+        task.workspace_path = Some(workspace_root.to_string_lossy().to_string());
+
+        let result = cleanup_workspace_after_completion(&mut task);
+
+        assert!(result.is_none());
+        assert!(task.workspace_path.is_none());
+        assert!(!workspace_root.exists());
+    }
 }

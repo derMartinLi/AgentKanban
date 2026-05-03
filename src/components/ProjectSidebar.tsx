@@ -100,7 +100,7 @@ export function ProjectSidebar({
           type="button"
         >
           <div className="project-pill__avatar project-pill__avatar--all">
-            <FolderGit2 size={16} />
+            <FolderGit2 size={14} />
           </div>
           {!collapsed ? (
             <div className="project-pill__body">
@@ -122,13 +122,13 @@ export function ProjectSidebar({
                 type="button"
               >
                 <div className="project-pill__avatar">
-                  <Badge dot={stats.active > 0} offset={[-2, 22]} color={project.isLinked ? '#51CF66' : '#FCC419'}>
+                  <Badge dot={stats.active > 0} offset={[-1, 18]} color={project.isLinked ? '#51CF66' : '#FCC419'}>
                     <span>{getProjectInitial(project.name)}</span>
                   </Badge>
                 </div>
                 {!collapsed ? (
                   <div className="project-pill__body">
-                    <strong>{project.name}</strong>
+                    <strong title={project.name}>{project.name}</strong>
                     <span>
                       {project.isLinked ? `${stats.total} tasks · ${stats.active} active` : 'Discovered only'}
                     </span>

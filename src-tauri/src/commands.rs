@@ -1,4 +1,4 @@
-use crate::{domain::{HarnessConfig, Project, Task, TaskLogEntry}, task_runner::{AppState, CreateTaskInput, TauriEventSink}};
+use crate::{domain::{HarnessConfig, Project, Task, TaskLogEntry}, events::TauriEventSink, task_runner::{AppState, CreateTaskInput}};
 use tauri::{AppHandle, State};
 
 fn map_error(error: impl ToString) -> String {
@@ -18,6 +18,16 @@ pub async fn detect_cli_tools(state: State<'_, AppState>) -> Result<Vec<String>,
 #[tauri::command]
 pub fn find_projects(state: State<'_, AppState>, root_dir: String) -> Result<Vec<Project>, String> {
     state.find_projects(root_dir.as_ref()).map_err(map_error)
+}
+
+#[tauri::command]
+pub fn list_registered_projects(state: State<'_, AppState>) -> Result<Vec<Project>, String> {
+    state.list_registered_projects().map_err(map_error)
+}
+
+#[tauri::command]
+pub fn discover_projects(state: State<'_, AppState>, root_dir: String) -> Result<Vec<Project>, String> {
+    state.discover_projects(root_dir.as_ref()).map_err(map_error)
 }
 
 #[tauri::command]

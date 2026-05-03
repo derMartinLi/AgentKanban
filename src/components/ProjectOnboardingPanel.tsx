@@ -1,10 +1,14 @@
-import { useState } from 'react';
-import { FolderPlus, GitBranch, Link2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FolderPlus, GitBranch, Link2, Search } from 'lucide-react';
+import type { ProjectSummary } from '../lib/types';
 
 type ProjectOnboardingPanelProps = {
   isRegistering: boolean;
+  isDiscovering?: boolean;
   registrationError: string | null;
   onRegisterProject: (repositoryPath: string) => Promise<void>;
+  onDiscoverProjects: (rootDir: string) => Promise<void>;
+  discoveredProjects: ProjectSummary[];
   projectRoot?: string;
   linkedProjectCount?: number;
   previewMode?: boolean;
@@ -12,13 +16,21 @@ type ProjectOnboardingPanelProps = {
 
 export function ProjectOnboardingPanel({
   isRegistering,
+  isDiscovering,
   registrationError,
   onRegisterProject,
+  onDiscoverProjects,
+  discoveredProjects,
   projectRoot,
   linkedProjectCount,
   previewMode,
 }: ProjectOnboardingPanelProps) {
   const [repositoryPath, setRepositoryPath] = useState('');
+  const [scanRoot, setScanRoot] = useState(projectRoot ?? '');
+
+  useEffect(() => {
+    setScanRoot(projectRoot ?? '');
+  }, [projectRoot]);
 
   return (
     <section className="setup-panel">
@@ -47,6 +59,66 @@ export function ProjectOnboardingPanel({
           </div>
         </div>
       </div>
+
+      <div className="setup-panel__scan">
+        <label className="field">
+          <span>Directory to scan</span>
+          <input
+            onChange={(event) => setScanRoot(event.target.value)}
+            placeholder="C:/repos"
+            value={scanRoot}
+          />
+        </label>
+
+        <button
+          className="secondary-button"
+          disabled={previewMode || isDiscovering || !scanRoot.trim()}
+          onClick={() => void onDiscoverProjects(scanRoot.trim())}
+          type="button"
+        >
+          <Search size={16} />
+          <span>{isDiscovering ? 'Scanning...' : 'Scan Directory'}</span>
+        </button>
+      </div>
+
+      {previewMode ? (
+        <p className="inline-note">
+          Browser preview can stage the UI, but directory scanning is only available in the desktop runtime.
+        </p>
+      ) : null}
+
+      {discoveredProjects.length > 0 ? (
+        <div className="setup-panel__discovered">
+          <div className="setup-panel__discovered-header">
+            <span className="detail-label">Discovered repositories</span>
+            <strong>{discoveredProjects.length} found</strong>
+          </div>
+
+          <div className="setup-panel__discovered-list">
+            {discoveredProjects.map((project) => (
+              <div key={`${project.path}-${project.id}`} className="discovered-project">
+                <div className="discovered-project__body">
+                  <strong title={project.name}>{project.name}</strong>
+                  <span title={project.path}>{project.path}</span>
+                  <span>
+                    {project.remoteUrl ? `${project.defaultBranch} · remote detected` : `${project.defaultBranch} · no remote metadata`}
+                  </span>
+                </div>
+
+                <button
+                  className="secondary-button"
+                  disabled={isRegistering}
+                  onClick={() => void onRegisterProject(project.path)}
+                  type="button"
+                >
+                  <Link2 size={14} />
+                  <span>Link</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <form
         className="form-stack"

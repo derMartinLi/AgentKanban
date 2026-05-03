@@ -12,9 +12,10 @@ import {
   answerQuestion,
   approveTask,
   createTask,
+  discoverProjects,
   detectCliTools,
-  findProjects,
   getDefaultProjectsRoot,
+  listRegisteredProjects,
   listTasks,
   loadHarnessConfig,
   loadTaskLogs,
@@ -70,7 +71,9 @@ function AppShell() {
   const setErrorMessage = useAppStore((state) => state.setErrorMessage);
   const setActiveQuestion = useAppStore((state) => state.setActiveQuestion);
   const [isRegisteringProject, setIsRegisteringProject] = useState(false);
+  const [isDiscoveringProjects, setIsDiscoveringProjects] = useState(false);
   const [registrationError, setRegistrationError] = useState<string | null>(null);
+  const [discoveredProjects, setDiscoveredProjects] = useState<typeof projects>([]);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   const tasks = useMemo(
@@ -149,15 +152,15 @@ function AppShell() {
         }
         setProjectRoot(root);
 
-        const [cliTools, discoveredProjects] = await Promise.all([detectCliTools(), findProjects(root)]);
+        const [cliTools, registeredProjects] = await Promise.all([detectCliTools(), listRegisteredProjects(root)]);
         if (cancelled) {
           return;
         }
 
         setAvailableCliTools(cliTools);
-        hydrateProjects(discoveredProjects);
+        hydrateProjects(registeredProjects);
         await Promise.all(
-          discoveredProjects.map(async (project) => {
+          registeredProjects.map(async (project) => {
             const [projectTasks, config] = await Promise.all([
               listTasks(project.id),
               loadHarnessConfig(project.id),
@@ -292,6 +295,9 @@ function AppShell() {
     try {
       const project = await registerProject(repositoryPath);
       upsertProject(project);
+      setDiscoveredProjects((current) =>
+        current.filter((candidate) => candidate.path.replace(/\\/g, '/').toLowerCase() !== repositoryPath.replace(/\\/g, '/').toLowerCase()),
+      );
       const [projectTasks, config] = await Promise.all([
         listTasks(project.id),
         loadHarnessConfig(project.id),
@@ -311,6 +317,27 @@ function AppShell() {
       throw new Error(nextError);
     } finally {
       setIsRegisteringProject(false);
+    }
+  };
+
+  const handleDiscoverProjects = async (rootDir: string) => {
+    setRegistrationError(null);
+    setIsDiscoveringProjects(true);
+    try {
+      const nextProjects = await discoverProjects(rootDir);
+      setDiscoveredProjects(nextProjects);
+      if (nextProjects.length === 0) {
+        message.info('No unregistered Git repositories found');
+      } else {
+        message.success(`Found ${nextProjects.length} repository${nextProjects.length === 1 ? '' : 'ies'}`);
+      }
+    } catch (error) {
+      const nextError = error instanceof Error ? error.message : String(error);
+      setRegistrationError(nextError);
+      setErrorMessage(nextError);
+      message.error(nextError);
+    } finally {
+      setIsDiscoveringProjects(false);
     }
   };
 
@@ -382,7 +409,10 @@ function AppShell() {
           ) : projects.length === 0 ? (
             <div className="workspace-empty">
               <ProjectOnboardingPanel
+                discoveredProjects={discoveredProjects}
+                isDiscovering={isDiscoveringProjects}
                 isRegistering={isRegisteringProject}
+                onDiscoverProjects={handleDiscoverProjects}
                 linkedProjectCount={linkedProjectCount}
                 onRegisterProject={handleRegisterProject}
                 previewMode={isBrowserPreviewMode}
@@ -588,7 +618,10 @@ function AppShell() {
         title="Link Repository"
       >
         <ProjectOnboardingPanel
+          discoveredProjects={discoveredProjects}
+          isDiscovering={isDiscoveringProjects}
           isRegistering={isRegisteringProject}
+          onDiscoverProjects={handleDiscoverProjects}
           linkedProjectCount={linkedProjectCount}
           onRegisterProject={handleRegisterProject}
           previewMode={isBrowserPreviewMode}

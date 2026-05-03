@@ -1,6 +1,6 @@
-import { Bot, Clock3, Plus } from 'lucide-react';
+import { Bot, Clock3, GitBranch, Plus } from 'lucide-react';
 import { Empty } from 'antd';
-import { BOARD_COLUMNS, formatTaskStatus, type TaskStatus, type TaskSummary } from '../lib/types';
+import { BOARD_COLUMNS, type TaskStatus, type TaskSummary } from '../lib/types';
 
 type TaskBoardProps = {
   tasks: TaskSummary[];
@@ -33,20 +33,6 @@ function getStatusTone(status: TaskStatus): string {
     default:
       return 'var(--color-primary)';
   }
-}
-
-function formatStamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '--';
-  }
-
-  return date.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 function formatDuration(start: string, end: string): string {
@@ -113,7 +99,7 @@ export function TaskBoard({
               <div className="task-column__body">
                 {columnTasks.length === 0 ? (
                   <div className="task-column__empty">
-                    <Empty description="No tasks" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    <Empty description="No tasks in this column" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                   </div>
                 ) : null}
 
@@ -131,31 +117,26 @@ export function TaskBoard({
                       <div className="task-card__status" />
 
                       <div className="task-card__body">
-                        <div className="task-card__topline">
-                          <span className="task-card__state">{formatTaskStatus(task.status)}</span>
-                          <span className="task-card__stamp">{formatStamp(task.updatedAt)}</span>
-                        </div>
-
-                        <strong>{task.title}</strong>
-                        <p>{task.description}</p>
+                        <strong title={task.title}>{task.title}</strong>
 
                         {showProjectName ? (
-                          <span className="task-card__project">{projectNameById[task.projectId] ?? task.projectId}</span>
+                          <span className="task-card__project" title={projectNameById[task.projectId] ?? task.projectId}>
+                            {projectNameById[task.projectId] ?? task.projectId}
+                          </span>
                         ) : null}
 
                         <div className="task-card__meta">
-                          <span>{task.branchName}</span>
-                          <span>{task.baseBranch}</span>
-                        </div>
-
-                        <div className="task-card__footer">
                           <span className="task-card__tool">
-                            <Bot size={14} />
+                            <Bot size={12} />
                             <span>{getCliBadge(task)}</span>
                           </span>
                           <span className="task-card__tool">
-                            <Clock3 size={14} />
+                            <Clock3 size={12} />
                             <span>{formatDuration(task.createdAt, task.updatedAt)}</span>
+                          </span>
+                          <span className="task-card__tool">
+                            <GitBranch size={12} />
+                            <span title={task.branchName}>{task.branchName}</span>
                           </span>
                         </div>
                       </div>

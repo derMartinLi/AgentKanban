@@ -77,6 +77,10 @@ function formatMetaDate(value: string | undefined): string {
   return date.toLocaleString();
 }
 
+function formatRevisionLabel(attempt: number): string {
+  return `Revision ${attempt}`;
+}
+
 export function TaskDetailsPanel({
   open,
   task,
@@ -95,6 +99,15 @@ export function TaskDetailsPanel({
   onRejectTask,
 }: TaskDetailsPanelProps) {
   const files = useMemo(() => parseUnifiedDiff(task?.diff), [task?.diff]);
+  const revisionHistory = useMemo(
+    () =>
+      task?.feedbackHistory.map((entry, index) => ({
+        id: `${task.id}-revision-${index + 1}`,
+        label: formatRevisionLabel(index + 1),
+        message: entry,
+      })) ?? [],
+    [task?.feedbackHistory, task?.id],
+  );
   const [selectedFileId, setSelectedFileId] = useState<string | null>(files[0]?.id ?? null);
   const [rejecting, setRejecting] = useState(false);
   const [rejectFeedback, setRejectFeedback] = useState('Please revise the implementation and address the acceptance notes.');
@@ -104,6 +117,10 @@ export function TaskDetailsPanel({
   const canApprove = task?.status === 'AWAITING_ACCEPTANCE';
   const canReject = task?.status === 'AWAITING_ACCEPTANCE';
   const statusColor = getStatusColor(task?.status);
+  const reviewSectionClassName = task?.status === 'AWAITING_ACCEPTANCE' ? 'detail-section detail-section--review' : 'detail-section';
+  const guardrailSectionClassName = task && ['NEEDS_REVISION', 'BLOCKED'].includes(task.status)
+    ? 'detail-section detail-section--warning'
+    : 'detail-section';
 
   useEffect(() => {
     setSelectedFileId(files[0]?.id ?? null);
@@ -214,15 +231,50 @@ export function TaskDetailsPanel({
                   </div>
                 ) : null}
 
-                <div className="detail-section">
-                  <span className="detail-label">Review</span>
-                  <p>{task.review ?? 'AI review output will appear here after the run finishes.'}</p>
+                <div className={reviewSectionClassName}>
+                  <div className="detail-section__header">
+                    <span className="detail-label">AI Review</span>
+                    {task.review ? <strong>Ready for operator review</strong> : null}
+                  </div>
+                  {task.review ? (
+                    <pre className="detail-preformatted">{task.review}</pre>
+                  ) : (
+                    <p className="detail-placeholder">AI review output will appear here after the run finishes.</p>
+                  )}
                 </div>
 
-                <div className="detail-section">
-                  <span className="detail-label">Guardrail report</span>
-                  <p>{task.latestGuardrailReport ?? 'No guardrail report yet.'}</p>
-                </div>
+                {(task.latestGuardrailReport || task.status === 'NEEDS_REVISION' || task.status === 'BLOCKED') ? (
+                  <div className={guardrailSectionClassName}>
+                    <div className="detail-section__header">
+                      <span className="detail-label">Guardrail report</span>
+                      {task.latestGuardrailReport ? <strong>Most recent feedback</strong> : null}
+                    </div>
+                    {task.latestGuardrailReport ? (
+                      <pre className="detail-preformatted">{task.latestGuardrailReport}</pre>
+                    ) : (
+                      <p className="detail-placeholder">No guardrail report yet.</p>
+                    )}
+                  </div>
+                ) : null}
+
+                {revisionHistory.length > 0 ? (
+                  <div className="detail-section detail-section--history">
+                    <div className="detail-section__header">
+                      <span className="detail-label">Revision History</span>
+                      <strong>{revisionHistory.length} rounds</strong>
+                    </div>
+                    <ol className="revision-list">
+                      {revisionHistory.map((revision) => (
+                        <li key={revision.id} className="revision-item">
+                          <div className="revision-item__header">
+                            <strong>{revision.label}</strong>
+                          </div>
+                          <pre className="detail-preformatted">{revision.message}</pre>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="detail-empty">

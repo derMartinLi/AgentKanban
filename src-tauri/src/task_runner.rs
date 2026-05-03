@@ -21,6 +21,53 @@ use tokio::{
 };
 use uuid::Uuid;
 
+// ---------------------------------------------------------------------------
+// Event sink trait – decouples task-runner logic from Tauri's AppHandle.
+// ---------------------------------------------------------------------------
+
+pub trait TaskEventSink: Clone + Send + Sync + 'static {
+    fn task_updated(&self, project_id: &str, task: &Task);
+    fn task_log(&self, project_id: &str, task_id: &str, entry: &TaskLogEntry);
+}
+
+// ---------------------------------------------------------------------------
+// Tauri-backed event sink
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct TauriEventSink {
+    app: AppHandle,
+}
+
+impl TauriEventSink {
+    pub fn new(app: &AppHandle) -> Self {
+        Self { app: app.clone() }
+    }
+}
+
+impl TaskEventSink for TauriEventSink {
+    fn task_updated(&self, project_id: &str, task: &Task) {
+        let _ = self.app.emit(
+            "task-updated",
+            TaskUpdatedPayload {
+                project_id: project_id.to_string(),
+                task: task.clone(),
+            },
+        );
+    }
+
+    fn task_log(&self, project_id: &str, task_id: &str, entry: &TaskLogEntry) {
+        let _ = self.app.emit(
+            "task-log",
+            TaskLogPayload {
+                project_id: project_id.to_string(),
+                task_id: task_id.to_string(),
+                entry: entry.clone(),
+            },
+        );
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct TaskUpdatedPayload {
     project_id: String,
@@ -204,26 +251,26 @@ impl AppState {
         Ok(task)
     }
 
-    pub async fn start_task(&self, app: AppHandle, project_id: String, task_id: String) -> Result<()> {
+    pub async fn start_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String) -> Result<()> {
         let state = self.clone();
         tokio::spawn(async move {
-            let _ = state.run_task(app, project_id, task_id).await;
+            let _ = state.run_task(sink, project_id, task_id).await;
         });
         Ok(())
     }
 
-    pub async fn retry_task(&self, app: AppHandle, project_id: String, task_id: String) -> Result<Task> {
+    pub async fn retry_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String) -> Result<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
         task = task.transition(TaskStatus::Executing)?;
         task.latest_error = None;
         task.pending_question = None;
         self.save_task(&project_id, task.clone())?;
-        self.emit_task_update(&app, &project_id, &task);
-        self.start_task(app, project_id, task_id).await?;
+        self.emit_task_update(&sink, &project_id, &task);
+        self.start_task(sink, project_id, task_id).await?;
         Ok(task)
     }
 
-    pub async fn answer_question(&self, app: AppHandle, project_id: String, task_id: String, reply: String) -> Result<Task> {
+    pub async fn answer_question(&self, sink: impl TaskEventSink, project_id: String, task_id: String, reply: String) -> Result<Task> {
         let key = runtime_key(&project_id, &task_id);
         if let Some(stdin) = self.runtime.stdin_handles.lock().await.get(&key).cloned() {
             let mut stdin = stdin.lock().await;
@@ -236,22 +283,22 @@ impl AppState {
         task.pending_question = None;
         task = task.transition(TaskStatus::Executing)?;
         self.save_task(&project_id, task.clone())?;
-        self.emit_task_update(&app, &project_id, &task);
+        self.emit_task_update(&sink, &project_id, &task);
         Ok(task)
     }
 
-    pub async fn reject_task(&self, app: AppHandle, project_id: String, task_id: String, feedback: String) -> Result<Task> {
+    pub async fn reject_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String, feedback: String) -> Result<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
         task.feedback_history.push(feedback);
         task.review = None;
         task = task.transition(TaskStatus::Executing)?;
         self.save_task(&project_id, task.clone())?;
-        self.emit_task_update(&app, &project_id, &task);
-        self.start_task(app, project_id, task_id).await?;
+        self.emit_task_update(&sink, &project_id, &task);
+        self.start_task(sink, project_id, task_id).await?;
         Ok(task)
     }
 
-    pub fn approve_task(&self, app: AppHandle, project_id: String, task_id: String) -> Result<Task> {
+    pub fn approve_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String) -> Result<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
         let source_path = task.project_path.clone().context("task is missing source project path")?;
         let workspace_path = task.workspace_path.clone().context("task is missing workspace path")?;
@@ -263,27 +310,27 @@ impl AppState {
         )?;
         task = task.transition(TaskStatus::Completed)?;
         self.save_task(&project_id, task.clone())?;
-        self.emit_task_update(&app, &project_id, &task);
+        self.emit_task_update(&sink, &project_id, &task);
         Ok(task)
     }
 
-    async fn run_task(&self, app: AppHandle, project_id: String, task_id: String) -> Result<()> {
+    async fn run_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String) -> Result<()> {
         let key = runtime_key(&project_id, &task_id);
         self.acquire_slot(&key).await;
 
-        let result = self.run_task_inner(&app, &project_id, &task_id).await;
+        let result = self.run_task_inner(&sink, &project_id, &task_id).await;
 
         self.runtime.active_tasks.lock().await.remove(&key);
         self.runtime.stdin_handles.lock().await.remove(&key);
 
         if let Err(error) = result {
-            let _ = self.fail_task(&app, &project_id, &task_id, error.to_string());
+            let _ = self.fail_task(&sink, &project_id, &task_id, error.to_string());
         }
 
         Ok(())
     }
 
-    async fn run_task_inner(&self, app: &AppHandle, project_id: &str, task_id: &str) -> Result<()> {
+    async fn run_task_inner(&self, sink: &impl TaskEventSink, project_id: &str, task_id: &str) -> Result<()> {
         loop {
             let mut task = self.get_task(project_id, task_id)?;
             let source_path = task.project_path.clone().context("task is missing source project path")?;
@@ -305,19 +352,19 @@ impl AppState {
             } else {
                 let updated = task.transition(TaskStatus::Executing)?;
                 self.save_task(project_id, updated.clone())?;
-                self.emit_task_update(app, project_id, &updated);
+                self.emit_task_update(sink, project_id, &updated);
                 updated
             };
 
             let payload = build_harness_payload(Path::new(&source_path), &executing_task, &config)?;
             let exit_ok = self
-                .run_cli_process(app, project_id, &executing_task, &workspace_path, payload.prompt, payload.env_vars)
+                .run_cli_process(sink, project_id, &executing_task, &workspace_path, payload.prompt, payload.env_vars)
                 .await?;
 
             if !exit_ok {
                 let latest = self.get_task(project_id, task_id)?;
                 if latest.status != TaskStatus::Failed {
-                    self.fail_task(app, project_id, task_id, latest.latest_error.unwrap_or_else(|| "task execution failed".into()))?;
+                    self.fail_task(sink, project_id, task_id, latest.latest_error.unwrap_or_else(|| "task execution failed".into()))?;
                 }
                 return Ok(());
             }
@@ -325,7 +372,7 @@ impl AppState {
             let mut guarded = self.get_task(project_id, task_id)?;
             guarded = guarded.transition(TaskStatus::GuardrailCheck)?;
             self.save_task(project_id, guarded.clone())?;
-            self.emit_task_update(app, project_id, &guarded);
+            self.emit_task_update(sink, project_id, &guarded);
 
             git_ops::commit_all(&workspace_path, &format!("task: {}", guarded.title))?;
 
@@ -340,14 +387,14 @@ impl AppState {
                         review_task.latest_error = Some(error.to_string());
                         review_task = review_task.transition(TaskStatus::Blocked)?;
                         self.save_task(project_id, review_task.clone())?;
-                        self.emit_task_update(app, project_id, &review_task);
+                        self.emit_task_update(sink, project_id, &review_task);
                         return Ok(());
                     }
 
                     review_task.remote_branch = Some(review_task.branch_name.clone());
                     review_task = review_task.transition(TaskStatus::AiReview)?;
                     self.save_task(project_id, review_task.clone())?;
-                    self.emit_task_update(app, project_id, &review_task);
+                    self.emit_task_update(sink, project_id, &review_task);
 
                     let review = self.run_review(&workspace_path, &review_task, &config, &diff).await;
 
@@ -355,7 +402,7 @@ impl AppState {
                     awaiting.review = Some(review.unwrap_or_else(|error| error.to_string()));
                     awaiting = awaiting.transition(TaskStatus::AwaitingAcceptance)?;
                     self.save_task(project_id, awaiting.clone())?;
-                    self.emit_task_update(app, project_id, &awaiting);
+                    self.emit_task_update(sink, project_id, &awaiting);
                     return Ok(());
                 }
                 GuardrailOutcome::NeedsRevision(report) => {
@@ -365,7 +412,7 @@ impl AppState {
                         revised = revised.transition(TaskStatus::Blocked)?;
                         revised.latest_error = Some(report);
                         self.save_task(project_id, revised.clone())?;
-                        self.emit_task_update(app, project_id, &revised);
+                        self.emit_task_update(sink, project_id, &revised);
                         return Ok(());
                     }
 
@@ -373,7 +420,7 @@ impl AppState {
                     revised.revision_count += 1;
                     revised = revised.transition(TaskStatus::NeedsRevision)?;
                     self.save_task(project_id, revised.clone())?;
-                    self.emit_task_update(app, project_id, &revised);
+                    self.emit_task_update(sink, project_id, &revised);
                     continue;
                 }
             }
@@ -382,7 +429,7 @@ impl AppState {
 
     async fn run_cli_process(
         &self,
-        app: &AppHandle,
+        sink: &impl TaskEventSink,
         project_id: &str,
         task: &Task,
         workspace_path: &Path,
@@ -413,7 +460,7 @@ impl AppState {
 
         let stdout_task = tokio::spawn(Self::stream_output(
             self.clone(),
-            app.clone(),
+            sink.clone(),
             project_id.to_string(),
             task.id.clone(),
             stdout,
@@ -421,7 +468,7 @@ impl AppState {
         ));
         let stderr_task = tokio::spawn(Self::stream_output(
             self.clone(),
-            app.clone(),
+            sink.clone(),
             project_id.to_string(),
             task.id.clone(),
             stderr,
@@ -434,7 +481,7 @@ impl AppState {
 
         if !status.success() {
             let message = format!("command exited with code {:?}", status.code());
-            self.fail_task(app, project_id, &task.id, message)?;
+            self.fail_task(sink, project_id, &task.id, message)?;
             return Ok(false);
         }
 
@@ -443,7 +490,7 @@ impl AppState {
 
     async fn stream_output<R>(
         state: AppState,
-        app: AppHandle,
+        sink: impl TaskEventSink,
         project_id: String,
         task_id: String,
         reader: R,
@@ -465,7 +512,7 @@ impl AppState {
                     });
                     task = task.transition(TaskStatus::WaitingForInput)?;
                     state.save_task(&project_id, task.clone())?;
-                    state.emit_task_update(&app, &project_id, &task);
+                    state.emit_task_update(&sink, &project_id, &task);
                     continue;
                 }
             }
@@ -476,14 +523,7 @@ impl AppState {
                 message: line,
             };
             state.storage.append_log(&task_id, &entry)?;
-            app.emit(
-                "task-log",
-                TaskLogPayload {
-                    project_id: project_id.clone(),
-                    task_id: task_id.clone(),
-                    entry,
-                },
-            )?;
+            sink.task_log(&project_id, &task_id, &entry);
         }
 
         Ok(())
@@ -559,7 +599,7 @@ impl AppState {
         }
     }
 
-    fn fail_task(&self, app: &AppHandle, project_id: &str, task_id: &str, error: String) -> Result<()> {
+    fn fail_task(&self, sink: &impl TaskEventSink, project_id: &str, task_id: &str, error: String) -> Result<()> {
         let task = self.get_task(project_id, task_id)?;
         let mut failed = if task.status == TaskStatus::Failed {
             task
@@ -569,7 +609,7 @@ impl AppState {
         failed.latest_error = Some(error);
         failed.pending_question = None;
         self.save_task(project_id, failed.clone())?;
-        self.emit_task_update(app, project_id, &failed);
+        self.emit_task_update(sink, project_id, &failed);
         Ok(())
     }
 
@@ -583,14 +623,8 @@ impl AppState {
         self.storage.save_tasks(project_id, &tasks)
     }
 
-    fn emit_task_update(&self, app: &AppHandle, project_id: &str, task: &Task) {
-        let _ = app.emit(
-            "task-updated",
-            TaskUpdatedPayload {
-                project_id: project_id.to_string(),
-                task: task.clone(),
-            },
-        );
+    fn emit_task_update(&self, sink: &impl TaskEventSink, project_id: &str, task: &Task) {
+        sink.task_updated(project_id, task);
     }
 }
 

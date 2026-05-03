@@ -1,4 +1,4 @@
-use crate::{domain::{HarnessConfig, Project, Task, TaskLogEntry}, task_runner::{AppState, CreateTaskInput}};
+use crate::{domain::{HarnessConfig, Project, Task, TaskLogEntry}, task_runner::{AppState, CreateTaskInput, TauriEventSink}};
 use tauri::{AppHandle, State};
 
 fn map_error(error: impl ToString) -> String {
@@ -42,12 +42,14 @@ pub fn create_task(state: State<'_, AppState>, input: CreateTaskInput) -> Result
 
 #[tauri::command]
 pub async fn start_task(app: AppHandle, state: State<'_, AppState>, project_id: String, task_id: String) -> Result<(), String> {
-    state.start_task(app, project_id, task_id).await.map_err(map_error)
+    let sink = TauriEventSink::new(&app);
+    state.start_task(sink, project_id, task_id).await.map_err(map_error)
 }
 
 #[tauri::command]
 pub async fn retry_task(app: AppHandle, state: State<'_, AppState>, project_id: String, task_id: String) -> Result<Task, String> {
-    state.retry_task(app, project_id, task_id).await.map_err(map_error)
+    let sink = TauriEventSink::new(&app);
+    state.retry_task(sink, project_id, task_id).await.map_err(map_error)
 }
 
 #[tauri::command]
@@ -58,12 +60,14 @@ pub async fn answer_question(
     task_id: String,
     reply: String,
 ) -> Result<Task, String> {
-    state.answer_question(app, project_id, task_id, reply).await.map_err(map_error)
+    let sink = TauriEventSink::new(&app);
+    state.answer_question(sink, project_id, task_id, reply).await.map_err(map_error)
 }
 
 #[tauri::command]
 pub fn approve_task(app: AppHandle, state: State<'_, AppState>, project_id: String, task_id: String) -> Result<Task, String> {
-    state.approve_task(app, project_id, task_id).map_err(map_error)
+    let sink = TauriEventSink::new(&app);
+    state.approve_task(sink, project_id, task_id).map_err(map_error)
 }
 
 #[tauri::command]
@@ -74,7 +78,8 @@ pub async fn reject_task(
     task_id: String,
     feedback: String,
 ) -> Result<Task, String> {
-    state.reject_task(app, project_id, task_id, feedback).await.map_err(map_error)
+    let sink = TauriEventSink::new(&app);
+    state.reject_task(sink, project_id, task_id, feedback).await.map_err(map_error)
 }
 
 #[tauri::command]

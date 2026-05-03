@@ -1,6 +1,6 @@
 import { Bot, Clock3, Plus } from 'lucide-react';
 import { Empty } from 'antd';
-import { formatTaskStatus, type TaskStatus, type TaskSummary } from '../lib/types';
+import { BOARD_COLUMNS, formatTaskStatus, type TaskStatus, type TaskSummary } from '../lib/types';
 
 type TaskBoardProps = {
   tasks: TaskSummary[];
@@ -10,32 +10,6 @@ type TaskBoardProps = {
   showProjectName: boolean;
   projectNameById: Record<string, string>;
 };
-
-const BOARD_COLUMNS: Array<{
-  id: string;
-  title: string;
-  hint: string;
-  statuses: TaskStatus[];
-}> = [
-  {
-    id: 'todo',
-    title: 'To Do',
-    hint: 'Queued and ready to start',
-    statuses: ['PENDING'],
-  },
-  {
-    id: 'running',
-    title: 'In Progress',
-    hint: 'Executing, waiting, or blocked',
-    statuses: ['EXECUTING', 'WAITING_FOR_INPUT', 'GUARDRAIL_CHECK', 'NEEDS_REVISION', 'BLOCKED', 'FAILED'],
-  },
-  {
-    id: 'review',
-    title: 'Review / Done',
-    hint: 'Ready for review or already merged',
-    statuses: ['AI_REVIEW', 'AWAITING_ACCEPTANCE', 'COMPLETED'],
-  },
-];
 
 function getStatusTone(status: TaskStatus): string {
   switch (status) {
@@ -114,8 +88,7 @@ export function TaskBoard({
       <div className="task-board__header">
         <div>
           <span className="section-kicker">Task Board</span>
-          <h2>Execution flow</h2>
-          <p>Compact lanes for queue, live execution, and review-ready work.</p>
+          <h2>Execution Flow</h2>
         </div>
 
         <button className="primary-button" onClick={onCreateTask} type="button">
@@ -133,7 +106,6 @@ export function TaskBoard({
               <header className="task-column__header">
                 <div>
                   <h3>{column.title}</h3>
-                  <p>{column.hint}</p>
                 </div>
                 <span className="count-badge">{columnTasks.length}</span>
               </header>
@@ -141,7 +113,7 @@ export function TaskBoard({
               <div className="task-column__body">
                 {columnTasks.length === 0 ? (
                   <div className="task-column__empty">
-                    <Empty description="没有进行中的任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    <Empty description="No tasks" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                   </div>
                 ) : null}
 

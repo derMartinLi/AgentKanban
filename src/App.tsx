@@ -125,18 +125,9 @@ function AppShell() {
     () => projects.filter((project) => project.isLinked).length,
     [projects],
   );
-  const awaitingAcceptanceCount = useMemo(
-    () => allTasks.filter((task) => task.status === 'AWAITING_ACCEPTANCE').length,
-    [allTasks],
-  );
   const promptCount = useMemo(() => allTasks.filter((task) => task.pendingQuestion).length, [allTasks]);
   const isBrowserPreviewMode = projectRoot === 'Browser preview mode';
   const selectedWorkspaceLabel = selectedProject?.name ?? 'All Projects';
-  const selectedWorkspaceStatus = selectedProject
-    ? selectedProject.isLinked
-      ? 'Linked repository'
-      : 'Discovered repository'
-    : 'Cross-project task board';
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
@@ -356,9 +347,8 @@ function AppShell() {
       <main className="workspace-shell">
         <header className="workspace-topbar">
           <div className="workspace-topbar__title">
-            <span className="workspace-title__eyebrow">AI Task Board</span>
+            <span className="workspace-title__eyebrow">Agent Kanban</span>
             <h1>{selectedWorkspaceLabel}</h1>
-            <p>{selectedWorkspaceStatus}</p>
           </div>
 
           <div className="workspace-topbar__actions">
@@ -376,29 +366,6 @@ function AppShell() {
             </button>
           </div>
         </header>
-
-        <section className="workspace-metrics">
-          <article className="metric-card">
-            <span>Running</span>
-            <strong>{activeTaskCount}</strong>
-            <p>Active agents across linked repositories.</p>
-          </article>
-          <article className="metric-card">
-            <span>Awaiting Review</span>
-            <strong>{awaitingAcceptanceCount}</strong>
-            <p>Tasks ready for approval or rejection.</p>
-          </article>
-          <article className="metric-card">
-            <span>Detected CLI</span>
-            <strong>{availableCliTools.length}</strong>
-            <p>Available runtimes detected from PATH.</p>
-          </article>
-          <article className="metric-card metric-card--accent">
-            <span>Workspace Root</span>
-            <strong>{linkedProjectCount}</strong>
-            <p>{projectRoot || 'Waiting for runtime root.'}</p>
-          </article>
-        </section>
 
         {errorMessage ? (
           <div className="inline-alert">
@@ -467,7 +434,6 @@ function AppShell() {
                 <div>
                   <span className="section-kicker">Board</span>
                   <h2>{selectedWorkspaceLabel}</h2>
-                  <p>Board updates stream in real time from the Tauri event bus.</p>
                 </div>
                 <div className="workspace-board-head__chips">
                   <span className="count-pill">{allTasks.length} tasks</span>

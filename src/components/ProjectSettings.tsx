@@ -126,6 +126,29 @@ export function ProjectSettings({ project, settings, onSave }: ProjectSettingsPr
         </label>
       </div>
 
+      <div className="field-grid">
+        <label className="field field--checkbox">
+          <span>Semgrep guardrail</span>
+          <input
+            checked={form.semgrepEnabled}
+            onChange={(event) => setForm({ ...form, semgrepEnabled: event.target.checked })}
+            type="checkbox"
+          />
+        </label>
+
+        <label className="field">
+          <span>Semgrep config</span>
+          <input
+            disabled={!form.semgrepEnabled}
+            onChange={(event) => setForm({ ...form, semgrepConfig: event.target.value })}
+            placeholder="auto"
+            value={form.semgrepConfig}
+          />
+        </label>
+      </div>
+
+      <p className="detail-caption">Semgrep only runs when enabled here and the `semgrep` binary is available on this machine.</p>
+
       <button className="primary-button" onClick={() => void onSave(form)} type="button">
         Save Project Settings
       </button>

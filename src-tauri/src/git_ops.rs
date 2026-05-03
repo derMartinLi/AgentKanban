@@ -1,9 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use std::{
-    fs,
-    path::Path,
-    process::Command,
-};
+use std::{fs, path::Path, process::Command};
 
 pub fn current_branch(project_path: &Path) -> Result<String> {
     let output = git(project_path, ["branch", "--show-current"])?;
@@ -16,7 +12,10 @@ pub fn current_branch(project_path: &Path) -> Result<String> {
 }
 
 pub fn default_branch(project_path: &Path) -> Result<String> {
-    if let Ok(output) = git(project_path, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+    if let Ok(output) = git(
+        project_path,
+        ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    ) {
         let branch = output.trim().trim_start_matches("origin/");
         if !branch.is_empty() {
             return Ok(branch.to_string());
@@ -42,9 +41,18 @@ pub fn origin_remote_url(project_path: &Path) -> Result<String> {
     }
 }
 
-pub fn create_workspace(project_path: &Path, workspace_path: &Path, base_branch: &str, branch_name: &str) -> Result<()> {
-    if workspace_path.exists() {
+pub fn create_workspace(
+    project_path: &Path,
+    workspace_path: &Path,
+    base_branch: &str,
+    branch_name: &str,
+) -> Result<()> {
+    if workspace_path.join(".git").exists() {
         return Ok(());
+    }
+
+    if workspace_path.exists() {
+        fs::remove_dir_all(workspace_path)?;
     }
 
     let upstream_origin = origin_remote_url(project_path)?;
@@ -53,11 +61,25 @@ pub fn create_workspace(project_path: &Path, workspace_path: &Path, base_branch:
         fs::create_dir_all(parent)?;
     }
 
-    command(project_path, "git", ["clone", project_path.to_string_lossy().as_ref(), workspace_path.to_string_lossy().as_ref()])?;
+    command(
+        project_path,
+        "git",
+        [
+            "clone",
+            project_path.to_string_lossy().as_ref(),
+            workspace_path.to_string_lossy().as_ref(),
+        ],
+    )?;
     git(workspace_path, ["config", "user.name", "AI Assistant"])?;
-    git(workspace_path, ["config", "user.email", "ai-assistant@local"])?;
+    git(
+        workspace_path,
+        ["config", "user.email", "ai-assistant@local"],
+    )?;
     git(workspace_path, ["remote", "rename", "origin", "source"])?;
-    git(workspace_path, ["remote", "add", "origin", &upstream_origin])?;
+    git(
+        workspace_path,
+        ["remote", "add", "origin", &upstream_origin],
+    )?;
     git(workspace_path, ["fetch", "origin"])?;
     checkout_base_branch(workspace_path, base_branch)?;
     git(workspace_path, ["checkout", "-B", branch_name])?;
@@ -75,7 +97,11 @@ pub fn commit_all(workspace_path: &Path, message: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn diff_against_base(workspace_path: &Path, base_branch: &str, branch_name: &str) -> Result<String> {
+pub fn diff_against_base(
+    workspace_path: &Path,
+    base_branch: &str,
+    branch_name: &str,
+) -> Result<String> {
     git(
         workspace_path,
         ["diff", &format!("{base_branch}...{branch_name}")],
@@ -91,8 +117,20 @@ pub fn push_branch(workspace_path: &Path, branch_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn merge_workspace_branch(source_project_path: &Path, workspace_path: &Path, branch_name: &str, base_branch: &str) -> Result<()> {
-    git(source_project_path, ["fetch", workspace_path.to_string_lossy().as_ref(), branch_name])?;
+pub fn merge_workspace_branch(
+    source_project_path: &Path,
+    workspace_path: &Path,
+    branch_name: &str,
+    base_branch: &str,
+) -> Result<()> {
+    git(
+        source_project_path,
+        [
+            "fetch",
+            workspace_path.to_string_lossy().as_ref(),
+            branch_name,
+        ],
+    )?;
     git(source_project_path, ["checkout", base_branch])?;
     git(source_project_path, ["merge", "--no-edit", "FETCH_HEAD"])?;
 
@@ -152,15 +190,29 @@ fn branch_exists(project_path: &Path, branch_name: &str) -> Result<bool> {
         return Ok(true);
     }
 
-    let remote = git(project_path, ["branch", "--remote", "--list", &format!("origin/{branch_name}")])?;
+    let remote = git(
+        project_path,
+        [
+            "branch",
+            "--remote",
+            "--list",
+            &format!("origin/{branch_name}"),
+        ],
+    )?;
     Ok(!remote.trim().is_empty())
 }
 
 fn checkout_base_branch(workspace_path: &Path, base_branch: &str) -> Result<()> {
     let remote_branch = format!("origin/{base_branch}");
-    let remote = git(workspace_path, ["branch", "--remote", "--list", &remote_branch])?;
+    let remote = git(
+        workspace_path,
+        ["branch", "--remote", "--list", &remote_branch],
+    )?;
     if !remote.trim().is_empty() {
-        git(workspace_path, ["checkout", "-B", base_branch, &remote_branch])?;
+        git(
+            workspace_path,
+            ["checkout", "-B", base_branch, &remote_branch],
+        )?;
         return Ok(());
     }
 
@@ -170,5 +222,7 @@ fn checkout_base_branch(workspace_path: &Path, base_branch: &str) -> Result<()> 
         return Ok(());
     }
 
-    Err(anyhow!(format!("base branch {base_branch} was not found in the linked repository")))
+    Err(anyhow!(format!(
+        "base branch {base_branch} was not found in the linked repository"
+    )))
 }

@@ -1,5 +1,8 @@
 use crate::{
-    domain::{timestamp_now, HarnessConfig, Project, Task, TaskLogEntry, TaskQuestion, TaskStatus},
+    domain::{
+        timestamp_now, HarnessConfig, Project, Task, TaskLogEntry, TaskQuestion, TaskStatus,
+        TaskTemplate,
+    },
     events::TaskEventSink,
     git_ops,
     harness::build_harness_payload,
@@ -122,11 +125,13 @@ impl AppState {
             .collect::<HashSet<_>>();
 
         let mut projects = self.storage.discover_projects(root_dir)?;
-        projects.retain(|project| !registered_paths.contains(&normalize_project_path(&project.path)));
+        projects
+            .retain(|project| !registered_paths.contains(&normalize_project_path(&project.path)));
 
         for project in &mut projects {
             let project_path = Path::new(&project.path);
-            project.default_branch = git_ops::default_branch(project_path).unwrap_or_else(|_| "main".into());
+            project.default_branch =
+                git_ops::default_branch(project_path).unwrap_or_else(|_| "main".into());
             project.remote_url = git_ops::origin_remote_url(project_path).ok();
             project.is_linked = false;
         }
@@ -137,7 +142,9 @@ impl AppState {
 
     pub fn register_project(&self, project_path: &Path) -> Result<Project> {
         if !project_path.exists() || !project_path.is_dir() {
-            return Err(anyhow!("repository path does not exist or is not a directory"));
+            return Err(anyhow!(
+                "repository path does not exist or is not a directory"
+            ));
         }
 
         if !project_path.join(".git").exists() {
@@ -187,7 +194,15 @@ impl AppState {
         self.storage.load_harness_config(project_id)
     }
 
-    pub async fn save_harness_config(&self, project_id: &str, config: HarnessConfig) -> Result<HarnessConfig> {
+    pub fn list_task_templates(&self) -> Result<Vec<TaskTemplate>> {
+        self.storage.load_task_templates()
+    }
+
+    pub async fn save_harness_config(
+        &self,
+        project_id: &str,
+        config: HarnessConfig,
+    ) -> Result<HarnessConfig> {
         self.storage.save_harness_config(project_id, &config)?;
         *self.runtime.max_concurrency.lock().await = config.max_concurrency.max(1);
         Ok(config)
@@ -198,10 +213,14 @@ impl AppState {
             .storage
             .load_registered_projects()?
             .into_iter()
-            .any(|project| normalize_project_path(&project.path) == normalize_project_path(&input.project_path));
+            .any(|project| {
+                normalize_project_path(&project.path) == normalize_project_path(&input.project_path)
+            });
 
         if !is_registered {
-            return Err(anyhow!("project must be linked in Agent Kanban before creating tasks"));
+            return Err(anyhow!(
+                "project must be linked in Agent Kanban before creating tasks"
+            ));
         }
 
         git_ops::origin_remote_url(Path::new(&input.project_path))
@@ -225,7 +244,12 @@ impl AppState {
         Ok(task)
     }
 
-    pub async fn start_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String) -> Result<()> {
+    pub async fn start_task(
+        &self,
+        sink: impl TaskEventSink,
+        project_id: String,
+        task_id: String,
+    ) -> Result<()> {
         let state = self.clone();
         tokio::spawn(async move {
             let _ = state.run_task(sink, project_id, task_id).await;
@@ -233,7 +257,12 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn retry_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String) -> Result<Task> {
+    pub async fn retry_task(
+        &self,
+        sink: impl TaskEventSink,
+        project_id: String,
+        task_id: String,
+    ) -> Result<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
         task = task.transition(TaskStatus::Executing)?;
         task.latest_error = None;
@@ -244,7 +273,13 @@ impl AppState {
         Ok(task)
     }
 
-    pub async fn answer_question(&self, sink: impl TaskEventSink, project_id: String, task_id: String, reply: String) -> Result<Task> {
+    pub async fn answer_question(
+        &self,
+        sink: impl TaskEventSink,
+        project_id: String,
+        task_id: String,
+        reply: String,
+    ) -> Result<Task> {
         let key = runtime_key(&project_id, &task_id);
         if let Some(stdin) = self.runtime.stdin_handles.lock().await.get(&key).cloned() {
             let mut stdin = stdin.lock().await;
@@ -262,7 +297,13 @@ impl AppState {
         Ok(task)
     }
 
-    pub async fn reject_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String, feedback: String) -> Result<Task> {
+    pub async fn reject_task(
+        &self,
+        sink: impl TaskEventSink,
+        project_id: String,
+        task_id: String,
+        feedback: String,
+    ) -> Result<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
         task.feedback_history.push(feedback);
         task.review = None;
@@ -273,10 +314,21 @@ impl AppState {
         Ok(task)
     }
 
-    pub fn approve_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String) -> Result<Task> {
+    pub fn approve_task(
+        &self,
+        sink: impl TaskEventSink,
+        project_id: String,
+        task_id: String,
+    ) -> Result<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
-        let source_path = task.project_path.clone().context("task is missing source project path")?;
-        let workspace_path = task.workspace_path.clone().context("task is missing workspace path")?;
+        let source_path = task
+            .project_path
+            .clone()
+            .context("task is missing source project path")?;
+        let workspace_path = task
+            .workspace_path
+            .clone()
+            .context("task is missing workspace path")?;
         git_ops::merge_workspace_branch(
             Path::new(&source_path),
             Path::new(&workspace_path),
@@ -292,7 +344,12 @@ impl AppState {
         Ok(task)
     }
 
-    async fn run_task(&self, sink: impl TaskEventSink, project_id: String, task_id: String) -> Result<()> {
+    async fn run_task(
+        &self,
+        sink: impl TaskEventSink,
+        project_id: String,
+        task_id: String,
+    ) -> Result<()> {
         let key = runtime_key(&project_id, &task_id);
         self.acquire_slot(&key).await;
 
@@ -310,10 +367,18 @@ impl AppState {
         Ok(())
     }
 
-    async fn run_task_inner(&self, sink: &impl TaskEventSink, project_id: &str, task_id: &str) -> Result<()> {
+    async fn run_task_inner(
+        &self,
+        sink: &impl TaskEventSink,
+        project_id: &str,
+        task_id: &str,
+    ) -> Result<()> {
         loop {
             let mut task = self.get_task(project_id, task_id)?;
-            let source_path = task.project_path.clone().context("task is missing source project path")?;
+            let source_path = task
+                .project_path
+                .clone()
+                .context("task is missing source project path")?;
             let config = self.storage.load_harness_config(project_id)?;
             *self.runtime.max_concurrency.lock().await = config.max_concurrency.max(1);
 
@@ -321,7 +386,12 @@ impl AppState {
                 PathBuf::from(existing)
             } else {
                 let dir = self.storage.create_workspace_dir(task_id)?;
-                git_ops::create_workspace(Path::new(&source_path), &dir, &task.base_branch, &task.branch_name)?;
+                git_ops::create_workspace(
+                    Path::new(&source_path),
+                    &dir,
+                    &task.base_branch,
+                    &task.branch_name,
+                )?;
                 task.workspace_path = Some(dir.to_string_lossy().to_string());
                 self.save_task(project_id, task.clone())?;
                 dir
@@ -352,7 +422,14 @@ impl AppState {
             if !exit_ok {
                 let latest = self.get_task(project_id, task_id)?;
                 if latest.status != TaskStatus::Failed {
-                    self.fail_task(sink, project_id, task_id, latest.latest_error.unwrap_or_else(|| "task execution failed".into()))?;
+                    self.fail_task(
+                        sink,
+                        project_id,
+                        task_id,
+                        latest
+                            .latest_error
+                            .unwrap_or_else(|| "task execution failed".into()),
+                    )?;
                 }
                 return Ok(());
             }
@@ -364,14 +441,23 @@ impl AppState {
 
             git_ops::commit_all(&workspace_path, &format!("task: {}", guarded.title))?;
 
-            match self.run_guardrails(&workspace_path, &guarded, &config).await? {
+            match self
+                .run_guardrails(&workspace_path, &guarded, &config)
+                .await?
+            {
                 GuardrailOutcome::Passed => {
-                    let diff = git_ops::diff_against_base(&workspace_path, &guarded.base_branch, &guarded.branch_name)
-                        .unwrap_or_default();
+                    let diff = git_ops::diff_against_base(
+                        &workspace_path,
+                        &guarded.base_branch,
+                        &guarded.branch_name,
+                    )
+                    .unwrap_or_default();
                     let mut review_task = self.get_task(project_id, task_id)?;
                     review_task.diff = Some(diff.clone());
 
-                    if let Err(error) = git_ops::push_branch(&workspace_path, &review_task.branch_name) {
+                    if let Err(error) =
+                        git_ops::push_branch(&workspace_path, &review_task.branch_name)
+                    {
                         review_task.latest_error = Some(error.to_string());
                         review_task = review_task.transition(TaskStatus::Blocked)?;
                         self.save_task(project_id, review_task.clone())?;
@@ -384,7 +470,9 @@ impl AppState {
                     self.save_task(project_id, review_task.clone())?;
                     self.emit_task_update(sink, project_id, &review_task);
 
-                    let review = self.run_review(&workspace_path, &review_task, &config, &diff).await;
+                    let review = self
+                        .run_review(&workspace_path, &review_task, &config, &diff)
+                        .await;
 
                     let mut awaiting = self.get_task(project_id, task_id)?;
                     awaiting.review = Some(review.unwrap_or_else(|error| error.to_string()));
@@ -436,10 +524,16 @@ impl AppState {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = command.spawn().with_context(|| format!("failed to launch {}", task.cli_command))?;
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("failed to launch {}", task.cli_command))?;
         let key = runtime_key(project_id, &task.id);
         if let Some(process_id) = child.id() {
-            self.runtime.process_ids.lock().await.insert(key.clone(), process_id);
+            self.runtime
+                .process_ids
+                .lock()
+                .await
+                .insert(key.clone(), process_id);
         }
         let stdout = child.stdout.take().context("missing stdout pipe")?;
         let stderr = child.stderr.take().context("missing stderr pipe")?;
@@ -514,7 +608,12 @@ impl AppState {
                     });
                     task = task.transition(TaskStatus::WaitingForInput)?;
                     state.save_task(&project_id, task.clone())?;
-                    state.runtime.question_tokens.lock().await.insert(key, token.clone());
+                    state
+                        .runtime
+                        .question_tokens
+                        .lock()
+                        .await
+                        .insert(key, token.clone());
                     state.emit_task_update(&sink, &project_id, &task);
                     state.schedule_question_timeout(
                         sink.clone(),
@@ -539,7 +638,12 @@ impl AppState {
         Ok(())
     }
 
-    async fn run_guardrails(&self, workspace_path: &Path, task: &Task, config: &HarnessConfig) -> Result<GuardrailOutcome> {
+    async fn run_guardrails(
+        &self,
+        workspace_path: &Path,
+        task: &Task,
+        config: &HarnessConfig,
+    ) -> Result<GuardrailOutcome> {
         for command_line in &config.guardrail_commands {
             if command_line.trim().is_empty() {
                 continue;
@@ -551,10 +655,23 @@ impl AppState {
             }
         }
 
+        if config.semgrep_enabled && command_exists("semgrep").await {
+            let output = run_semgrep_guardrail(workspace_path, task, config).await?;
+            if !output.success {
+                return Ok(GuardrailOutcome::NeedsRevision(output.output));
+            }
+        }
+
         Ok(GuardrailOutcome::Passed)
     }
 
-    async fn run_review(&self, workspace_path: &Path, task: &Task, config: &HarnessConfig, diff: &str) -> Result<String> {
+    async fn run_review(
+        &self,
+        workspace_path: &Path,
+        task: &Task,
+        config: &HarnessConfig,
+        diff: &str,
+    ) -> Result<String> {
         let review_prompt = format!(
             "Review the following diff for task '{}' and summarize the most important findings.\n\n{}",
             task.title, diff
@@ -609,7 +726,13 @@ impl AppState {
         }
     }
 
-    fn fail_task(&self, sink: &impl TaskEventSink, project_id: &str, task_id: &str, error: String) -> Result<()> {
+    fn fail_task(
+        &self,
+        sink: &impl TaskEventSink,
+        project_id: &str,
+        task_id: &str,
+        error: String,
+    ) -> Result<()> {
         let task = self.get_task(project_id, task_id)?;
         let mut failed = if task.status == TaskStatus::Failed {
             task
@@ -664,7 +787,12 @@ impl AppState {
         let message = format!("Question timed out after {timeout_secs} seconds");
         self.append_system_log(&sink, &project_id, &task_id, message.clone())?;
         if let Err(error) = self.kill_tracked_process(&key).await {
-            self.append_system_log(&sink, &project_id, &task_id, format!("Failed to terminate timed out process: {error}"))?;
+            self.append_system_log(
+                &sink,
+                &project_id,
+                &task_id,
+                format!("Failed to terminate timed out process: {error}"),
+            )?;
         }
         self.runtime.question_tokens.lock().await.remove(&key);
         self.fail_task(&sink, &project_id, &task_id, message)?;
@@ -679,7 +807,13 @@ impl AppState {
         Ok(())
     }
 
-    fn append_system_log(&self, sink: &impl TaskEventSink, project_id: &str, task_id: &str, message: String) -> Result<()> {
+    fn append_system_log(
+        &self,
+        sink: &impl TaskEventSink,
+        project_id: &str,
+        task_id: &str,
+        message: String,
+    ) -> Result<()> {
         let entry = TaskLogEntry {
             timestamp: timestamp_now(),
             stream: "system".into(),
@@ -741,11 +875,17 @@ async fn kill_process(process_id: u32) -> Result<()> {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let detail = if stderr.is_empty() { stdout } else { stderr };
-        Err(anyhow!("failed to terminate process {process_id}: {detail}"))
+        Err(anyhow!(
+            "failed to terminate process {process_id}: {detail}"
+        ))
     }
 }
 
-async fn run_shell_command(cwd: &Path, command_line: &str, env_vars: &HashMap<String, String>) -> Result<CommandOutput> {
+async fn run_shell_command(
+    cwd: &Path,
+    command_line: &str,
+    env_vars: &HashMap<String, String>,
+) -> Result<CommandOutput> {
     #[cfg(target_os = "windows")]
     let mut command = {
         let mut cmd = Command::new("cmd");
@@ -760,11 +900,7 @@ async fn run_shell_command(cwd: &Path, command_line: &str, env_vars: &HashMap<St
         cmd
     };
 
-    let output = command
-        .current_dir(cwd)
-        .envs(env_vars)
-        .output()
-        .await?;
+    let output = command.current_dir(cwd).envs(env_vars).output().await?;
 
     Ok(CommandOutput {
         success: output.status.success(),
@@ -811,7 +947,38 @@ async fn run_direct_command(
     })
 }
 
+async fn run_semgrep_guardrail(
+    cwd: &Path,
+    task: &Task,
+    config: &HarnessConfig,
+) -> Result<CommandOutput> {
+    let semgrep_config = if config.semgrep_config.trim().is_empty() {
+        String::from("auto")
+    } else {
+        config.semgrep_config.trim().to_string()
+    };
+
+    run_direct_command(
+        cwd,
+        "semgrep",
+        &[
+            String::from("scan"),
+            String::from("--config"),
+            semgrep_config,
+            String::from("--error"),
+            String::from("."),
+        ],
+        &task.env_vars,
+        None,
+    )
+    .await
+}
+
 async fn command_exists(command_name: &str) -> bool {
+    if looks_like_path(command_name) {
+        return Path::new(command_name).exists();
+    }
+
     #[cfg(target_os = "windows")]
     let output = Command::new("where").arg(command_name).output().await;
 
@@ -819,6 +986,10 @@ async fn command_exists(command_name: &str) -> bool {
     let output = Command::new("which").arg(command_name).output().await;
 
     output.map(|value| value.status.success()).unwrap_or(false)
+}
+
+fn looks_like_path(value: &str) -> bool {
+    value.contains('\\') || value.contains('/') || value.contains(':')
 }
 
 fn create_task_title(description: &str) -> String {
@@ -867,15 +1038,23 @@ fn cleanup_workspace_after_completion(task: &mut Task) -> Option<String> {
             task.workspace_path = None;
             None
         }
-        Err(error) => Some(format!("Workspace cleanup failed for {workspace_path}: {error}")),
+        Err(error) => Some(format!(
+            "Workspace cleanup failed for {workspace_path}: {error}"
+        )),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, sync::{Arc, Mutex as StdMutex}};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        process::Command as StdCommand,
+        sync::{Arc, Mutex as StdMutex},
+    };
     use tokio::io::{duplex, AsyncWriteExt};
+    use tokio::time::{sleep as tokio_sleep, Duration as TokioDuration};
 
     #[derive(Clone, Default)]
     struct MockSink {
@@ -892,10 +1071,11 @@ mod tests {
         }
 
         fn task_log(&self, project_id: &str, task_id: &str, entry: &TaskLogEntry) {
-            self.logs
-                .lock()
-                .expect("logs mutex poisoned")
-                .push((project_id.to_string(), task_id.to_string(), entry.clone()));
+            self.logs.lock().expect("logs mutex poisoned").push((
+                project_id.to_string(),
+                task_id.to_string(),
+                entry.clone(),
+            ));
         }
     }
 
@@ -926,7 +1106,8 @@ mod tests {
 
         let sink = MockSink::default();
         let (mut writer, reader) = duplex(256);
-        let payload = serde_json::json!({ "q": "Need approval", "opts": ["yes", "no"] }).to_string();
+        let payload =
+            serde_json::json!({ "q": "Need approval", "opts": ["yes", "no"] }).to_string();
         writer
             .write_all(format!("___QUESTION___{payload}\n").as_bytes())
             .await
@@ -950,7 +1131,13 @@ mod tests {
             .expect("load updated task");
 
         assert_eq!(updated.status, TaskStatus::WaitingForInput);
-        assert_eq!(updated.pending_question.as_ref().map(|question| question.q.as_str()), Some("Need approval"));
+        assert_eq!(
+            updated
+                .pending_question
+                .as_ref()
+                .map(|question| question.q.as_str()),
+            Some("Need approval")
+        );
         assert_eq!(sink.updates.lock().expect("read updates").len(), 1);
         assert!(sink.logs.lock().expect("read logs").is_empty());
 
@@ -978,7 +1165,9 @@ mod tests {
             }])
             .expect("save registered project");
 
-        let discovered = state.discover_projects(&repos_root).expect("discover projects");
+        let discovered = state
+            .discover_projects(&repos_root)
+            .expect("discover projects");
 
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].name, "beta");
@@ -1026,7 +1215,13 @@ mod tests {
 
         let sink = MockSink::default();
         state
-            .handle_question_timeout(sink.clone(), "project-1".into(), waiting_task.id.clone(), "token-1".into(), 0)
+            .handle_question_timeout(
+                sink.clone(),
+                "project-1".into(),
+                waiting_task.id.clone(),
+                "token-1".into(),
+                0,
+            )
             .await
             .expect("handle question timeout");
 
@@ -1034,18 +1229,31 @@ mod tests {
             .get_task("project-1", &waiting_task.id)
             .expect("load failed task");
         assert_eq!(failed.status, TaskStatus::Failed);
-        assert_eq!(failed.latest_error.as_deref(), Some("Question timed out after 0 seconds"));
+        assert_eq!(
+            failed.latest_error.as_deref(),
+            Some("Question timed out after 0 seconds")
+        );
 
-        let logs = state.storage.read_logs(&waiting_task.id).expect("read timeout logs");
-        assert!(logs.iter().any(|entry| entry.stream == "system" && entry.message.contains("Question timed out after 0 seconds")));
-        assert!(sink.logs.lock().expect("read logs").iter().any(|(_, _, entry)| entry.stream == "system"));
+        let logs = state
+            .storage
+            .read_logs(&waiting_task.id)
+            .expect("read timeout logs");
+        assert!(logs.iter().any(|entry| entry.stream == "system"
+            && entry.message.contains("Question timed out after 0 seconds")));
+        assert!(sink
+            .logs
+            .lock()
+            .expect("read logs")
+            .iter()
+            .any(|(_, _, entry)| entry.stream == "system"));
 
         fs::remove_dir_all(root).expect("remove test storage");
     }
 
     #[test]
     fn cleanup_workspace_after_completion_removes_directory_and_clears_path() {
-        let workspace_root = std::env::temp_dir().join(format!("agentkanban-workspace-cleanup-{}", Uuid::new_v4()));
+        let workspace_root =
+            std::env::temp_dir().join(format!("agentkanban-workspace-cleanup-{}", Uuid::new_v4()));
         fs::create_dir_all(&workspace_root).expect("create workspace root");
         fs::write(workspace_root.join("marker.txt"), "ok").expect("seed workspace file");
 
@@ -1065,5 +1273,326 @@ mod tests {
         assert!(result.is_none());
         assert!(task.workspace_path.is_none());
         assert!(!workspace_root.exists());
+    }
+
+    #[tokio::test]
+    async fn smoke_flow_covers_discovery_register_answer_approve_cleanup_and_timeout() {
+        let (state, root) = build_test_state();
+        let sink = MockSink::default();
+        let fixture = create_linked_repo_fixture(&root);
+
+        let discovered = state
+            .discover_projects(&fixture.scan_root)
+            .expect("discover unregistered projects");
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(
+            normalize_test_path(&discovered[0].path),
+            normalize_test_path(fixture.source_repo.to_string_lossy().as_ref())
+        );
+
+        let project = state
+            .register_project(&fixture.source_repo)
+            .expect("register discovered project");
+        let registered = state
+            .list_registered_projects()
+            .expect("load registered projects");
+        assert_eq!(registered.len(), 1);
+        assert_eq!(registered[0].id, project.id);
+
+        let mut harness_config = HarnessConfig::default();
+        harness_config.guardrail_commands.clear();
+        harness_config.review_command = format!("node {}", fixture.review_script.to_string_lossy());
+        harness_config.question_timeout_secs = 1;
+        state
+            .save_harness_config(&project.id, harness_config)
+            .await
+            .expect("save harness config");
+
+        let answer_task = state
+            .create_task(CreateTaskInput {
+                project_id: project.id.clone(),
+                project_path: project.path.clone(),
+                base_branch: project.default_branch.clone(),
+                description: "ANSWER FLOW - implement feature file".into(),
+                cli_command: "node".into(),
+                cli_args: vec![fixture.agent_script.to_string_lossy().into_owned()],
+                env_vars: HashMap::new(),
+            })
+            .expect("create answer-flow task");
+
+        let answer_handle = {
+            let state = state.clone();
+            let sink = sink.clone();
+            let project_id = project.id.clone();
+            let task_id = answer_task.id.clone();
+            tokio::spawn(async move { state.run_task(sink, project_id, task_id).await })
+        };
+
+        let waiting = wait_for_task_status(
+            &state,
+            &project.id,
+            &answer_task.id,
+            TaskStatus::WaitingForInput,
+        )
+        .await;
+        assert_eq!(
+            waiting
+                .pending_question
+                .as_ref()
+                .map(|question| question.q.as_str()),
+            Some("Apply generated change?")
+        );
+
+        let answered = state
+            .answer_question(
+                sink.clone(),
+                project.id.clone(),
+                answer_task.id.clone(),
+                "approve".into(),
+            )
+            .await
+            .expect("answer question");
+        assert_eq!(answered.status, TaskStatus::Executing);
+
+        answer_handle
+            .await
+            .expect("join answer task runner")
+            .expect("run answer task");
+
+        let awaiting_acceptance = wait_for_task_status(
+            &state,
+            &project.id,
+            &answer_task.id,
+            TaskStatus::AwaitingAcceptance,
+        )
+        .await;
+        let answer_workspace_path = awaiting_acceptance
+            .workspace_path
+            .clone()
+            .expect("workspace path should exist before approval");
+        assert!(
+            awaiting_acceptance
+                .review
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Review ok"),
+            "unexpected review output: {:?}",
+            awaiting_acceptance.review
+        );
+        assert!(Path::new(&answer_workspace_path).exists());
+
+        let completed = state
+            .approve_task(sink.clone(), project.id.clone(), answer_task.id.clone())
+            .expect("approve answer task");
+        assert_eq!(completed.status, TaskStatus::Completed);
+        assert!(completed.workspace_path.is_none());
+        assert!(!Path::new(&answer_workspace_path).exists());
+        assert_eq!(
+            fs::read_to_string(fixture.source_repo.join("feature.txt"))
+                .expect("read merged file")
+                .replace("\r\n", "\n"),
+            "approved change\n"
+        );
+
+        let timeout_task = state
+            .create_task(CreateTaskInput {
+                project_id: project.id.clone(),
+                project_path: project.path.clone(),
+                base_branch: project.default_branch.clone(),
+                description: "TIMEOUT FLOW - wait for operator forever".into(),
+                cli_command: "node".into(),
+                cli_args: vec![fixture.agent_script.to_string_lossy().into_owned()],
+                env_vars: HashMap::new(),
+            })
+            .expect("create timeout task");
+
+        let timeout_handle = {
+            let state = state.clone();
+            let sink = sink.clone();
+            let project_id = project.id.clone();
+            let task_id = timeout_task.id.clone();
+            tokio::spawn(async move { state.run_task(sink, project_id, task_id).await })
+        };
+
+        let failed =
+            wait_for_task_status(&state, &project.id, &timeout_task.id, TaskStatus::Failed).await;
+        timeout_handle
+            .await
+            .expect("join timeout task runner")
+            .expect("run timeout task");
+
+        assert_eq!(
+            failed.latest_error.as_deref(),
+            Some("Question timed out after 1 seconds")
+        );
+        assert!(failed.pending_question.is_none());
+        let timeout_logs = state
+            .storage
+            .read_logs(&timeout_task.id)
+            .expect("read timeout logs");
+        assert!(timeout_logs.iter().any(|entry| entry.stream == "system"
+            && entry.message.contains("Question timed out after 1 seconds")));
+
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    fn create_linked_repo_fixture(root: &Path) -> RepoFixture {
+        let scan_root = root.join("scan-root");
+        let script_root = root.join("test-scripts");
+        let upstream = root.join("upstream.git");
+        let source_repo = scan_root.join("alpha-app");
+        let agent_script = script_root.join("fake-agent.js");
+        let review_script = script_root.join("review.js");
+
+        fs::create_dir_all(&scan_root).expect("create scan root");
+        fs::create_dir_all(&script_root).expect("create script root");
+        git_cmd(
+            root,
+            [
+                "init",
+                "--bare",
+                "--initial-branch=main",
+                upstream.to_string_lossy().as_ref(),
+            ],
+        );
+        git_cmd(
+            &scan_root,
+            [
+                "init",
+                "--initial-branch=main",
+                source_repo.to_string_lossy().as_ref(),
+            ],
+        );
+        git_cmd(&source_repo, ["config", "user.name", "Test User"]);
+        git_cmd(&source_repo, ["config", "user.email", "test@example.com"]);
+        fs::write(source_repo.join("README.md"), "# Smoke Flow\n").expect("write readme");
+        fs::write(&agent_script, fake_agent_script()).expect("write fake agent");
+        fs::write(&review_script, "console.log('Review ok')\n").expect("write review script");
+        git_cmd(&source_repo, ["add", "README.md"]);
+        git_cmd(&source_repo, ["commit", "-m", "initial"]);
+        git_cmd(
+            &source_repo,
+            [
+                "remote",
+                "add",
+                "origin",
+                upstream.to_string_lossy().as_ref(),
+            ],
+        );
+        git_cmd(&source_repo, ["push", "-u", "origin", "main"]);
+
+        RepoFixture {
+            scan_root,
+            source_repo,
+            agent_script,
+            review_script,
+        }
+    }
+
+    async fn wait_for_task_status(
+        state: &AppState,
+        project_id: &str,
+        task_id: &str,
+        expected: TaskStatus,
+    ) -> Task {
+        for _ in 0..120 {
+            let task = state
+                .get_task(project_id, task_id)
+                .expect("load task while waiting");
+            if task.status == expected {
+                return task;
+            }
+
+            tokio_sleep(TokioDuration::from_millis(50)).await;
+        }
+
+        let task = state
+            .get_task(project_id, task_id)
+            .expect("load task after waiting");
+        let recent_logs = state
+            .storage
+            .read_logs(task_id)
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .rev()
+                    .take(5)
+                    .map(|entry| format!("[{}] {}", entry.stream, entry.message))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        panic!(
+            "task {task_id} did not reach status {:?}; latest status was {:?}; latest error was {:?}; recent logs: {:?}",
+            expected,
+            task.status,
+            task.latest_error,
+            recent_logs
+        );
+    }
+
+    fn git_cmd<I, S>(cwd: &Path, args: I) -> String
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let output = StdCommand::new("git")
+            .current_dir(cwd)
+            .args(args.into_iter().map(|value| value.as_ref().to_string()))
+            .output()
+            .expect("run git command");
+
+        if !output.status.success() {
+            panic!(
+                "git command failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn normalize_test_path(value: &str) -> String {
+        value.trim().replace('\\', "/").to_ascii_lowercase()
+    }
+
+    fn fake_agent_script() -> &'static str {
+        r#"const fs = require('fs');
+const prompt = process.argv[2] ?? '';
+
+if (prompt.includes('Review the following diff')) {
+  console.log('Review ok');
+  process.exit(0);
+} else if (prompt.includes('ANSWER FLOW')) {
+  console.log('___QUESTION___' + JSON.stringify({ q: 'Apply generated change?', opts: ['approve'] }));
+  process.stdin.setEncoding('utf8');
+  process.stdin.once('data', (data) => {
+    const reply = data.trim();
+    if (reply !== 'approve') {
+      console.error('unexpected reply: ' + reply);
+      process.exit(1);
+      return;
+    }
+
+    fs.writeFileSync('feature.txt', 'approved change\n');
+    console.log('implemented');
+    process.exit(0);
+  });
+  process.stdin.resume();
+} else if (prompt.includes('TIMEOUT FLOW')) {
+  console.log('___QUESTION___' + JSON.stringify({ q: 'Need approval', opts: ['approve'] }));
+  process.stdin.resume();
+  setInterval(() => {}, 1000);
+} else {
+    fs.writeFileSync('feature.txt', 'default\n');
+    process.exit(0);
+}
+"#
+    }
+
+    struct RepoFixture {
+        scan_root: PathBuf,
+        source_repo: PathBuf,
+        agent_script: PathBuf,
+        review_script: PathBuf,
     }
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AutoComplete, Button, Drawer, Empty, Input, Select } from 'antd';
 import { Plus, Trash2 } from 'lucide-react';
-import type { CreateTaskInput, ProjectSummary } from '../lib/types';
+import type { CreateTaskInput, ProjectSummary, TaskTemplate } from '../lib/types';
 
 type EnvVarRow = {
   key: string;
@@ -14,6 +14,7 @@ type CreateTaskComposerProps = {
   availableCliTools: string[];
   projects: ProjectSummary[];
   currentProjectId: string;
+  templates: TaskTemplate[];
   onCreateTask: (input: CreateTaskInput) => Promise<void>;
 };
 
@@ -41,6 +42,7 @@ export function CreateTaskComposer({
   availableCliTools,
   projects,
   currentProjectId,
+  templates,
   onCreateTask,
 }: CreateTaskComposerProps) {
   const linkedProjects = useMemo(() => projects.filter((project) => project.isLinked), [projects]);
@@ -53,6 +55,7 @@ export function CreateTaskComposer({
   }, [currentProjectId, linkedProjects]);
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(preferredProjectId);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [description, setDescription] = useState('');
   const [cliCommand, setCliCommand] = useState(availableCliTools[0] ?? 'codex');
   const [cliArgs, setCliArgs] = useState('');
@@ -65,6 +68,7 @@ export function CreateTaskComposer({
     }
 
     setSelectedProjectId(preferredProjectId);
+    setSelectedTemplateId('');
     setCliCommand(availableCliTools[0] ?? 'codex');
   }, [availableCliTools, open, preferredProjectId]);
 
@@ -115,6 +119,29 @@ export function CreateTaskComposer({
               <p>{selectedProject?.path ?? 'Select a project first.'}</p>
             </div>
           </div>
+
+          <label className="field">
+            <span>Task template</span>
+            <select
+              aria-label="Task template"
+              onChange={(event) => {
+                const nextTemplateId = event.target.value;
+                setSelectedTemplateId(nextTemplateId);
+                const template = templates.find((entry) => entry.id === nextTemplateId);
+                if (template) {
+                  setDescription(template.description);
+                }
+              }}
+              value={selectedTemplateId}
+            >
+              <option value="">Start from scratch</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.title}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <label className="field">
             <span>Task description</span>
@@ -215,6 +242,7 @@ export function CreateTaskComposer({
                     cliArgs: parseCliArgs(cliArgs),
                     envVars: toEnvRecord(envVars),
                   });
+                  setSelectedTemplateId('');
                   setDescription('');
                   setCliArgs('');
                   setEnvVars([{ key: '', value: '' }]);

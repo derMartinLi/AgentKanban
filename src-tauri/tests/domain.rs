@@ -35,28 +35,41 @@ fn question_enters_waiting_for_input_and_recovers() {
     let waiting = executing.transition(TaskStatus::WaitingForInput).unwrap();
 
     assert_eq!(waiting.status, TaskStatus::WaitingForInput);
-    assert!(waiting.transition(TaskStatus::Completed).is_err(), "can't complete while waiting for input");
-    assert!(waiting.transition(TaskStatus::Executing).is_ok(), "answering resumes execution");
+    assert!(
+        waiting.transition(TaskStatus::Completed).is_err(),
+        "can't complete while waiting for input"
+    );
+    assert!(
+        waiting.transition(TaskStatus::Executing).is_ok(),
+        "answering resumes execution"
+    );
 }
 
 #[test]
 fn guardrail_failure_to_needs_revision() {
     let task = make_test_task("task-g");
     let guardrail = task
-        .transition(TaskStatus::Executing).unwrap()
-        .transition(TaskStatus::GuardrailCheck).unwrap();
+        .transition(TaskStatus::Executing)
+        .unwrap()
+        .transition(TaskStatus::GuardrailCheck)
+        .unwrap();
     let revision = guardrail.transition(TaskStatus::NeedsRevision).unwrap();
 
     assert_eq!(revision.status, TaskStatus::NeedsRevision);
-    assert!(revision.transition(TaskStatus::Executing).is_ok(), "revision should loop back to executing");
+    assert!(
+        revision.transition(TaskStatus::Executing).is_ok(),
+        "revision should loop back to executing"
+    );
 }
 
 #[test]
 fn guardrail_failure_can_block() {
     let task = make_test_task("task-gb");
     let guardrail = task
-        .transition(TaskStatus::Executing).unwrap()
-        .transition(TaskStatus::GuardrailCheck).unwrap();
+        .transition(TaskStatus::Executing)
+        .unwrap()
+        .transition(TaskStatus::GuardrailCheck)
+        .unwrap();
     let blocked = guardrail.transition(TaskStatus::Blocked).unwrap();
 
     assert_eq!(blocked.status, TaskStatus::Blocked);
@@ -67,15 +80,22 @@ fn guardrail_failure_can_block() {
 fn ai_review_to_awaiting_acceptance_then_completed() {
     let task = make_test_task("task-r");
     let awaiting = task
-        .transition(TaskStatus::Executing).unwrap()
-        .transition(TaskStatus::GuardrailCheck).unwrap()
-        .transition(TaskStatus::AiReview).unwrap()
-        .transition(TaskStatus::AwaitingAcceptance).unwrap();
+        .transition(TaskStatus::Executing)
+        .unwrap()
+        .transition(TaskStatus::GuardrailCheck)
+        .unwrap()
+        .transition(TaskStatus::AiReview)
+        .unwrap()
+        .transition(TaskStatus::AwaitingAcceptance)
+        .unwrap();
 
     assert_eq!(awaiting.status, TaskStatus::AwaitingAcceptance);
     assert!(awaiting.transition(TaskStatus::Completed).is_ok());
     assert!(awaiting.transition(TaskStatus::Failed).is_ok());
-    assert!(awaiting.transition(TaskStatus::Pending).is_err(), "can't jump back to pending from awaiting");
+    assert!(
+        awaiting.transition(TaskStatus::Pending).is_err(),
+        "can't jump back to pending from awaiting"
+    );
 }
 
 #[test]
@@ -86,7 +106,9 @@ fn failed_can_retry_via_pending_or_executing() {
     assert_eq!(failed.status, TaskStatus::Failed);
     assert!(failed.transition(TaskStatus::Pending).is_ok());
     // re-create fresh task for second path
-    let failed2 = make_test_task("task-f2").transition(TaskStatus::Failed).unwrap();
+    let failed2 = make_test_task("task-f2")
+        .transition(TaskStatus::Failed)
+        .unwrap();
     assert!(failed2.transition(TaskStatus::Executing).is_ok());
 }
 
@@ -94,8 +116,10 @@ fn failed_can_retry_via_pending_or_executing() {
 fn blocked_is_terminal_but_can_retry() {
     let task = make_test_task("task-b");
     let blocked = task
-        .transition(TaskStatus::Executing).unwrap()
-        .transition(TaskStatus::Blocked).unwrap();
+        .transition(TaskStatus::Executing)
+        .unwrap()
+        .transition(TaskStatus::Blocked)
+        .unwrap();
 
     assert!(blocked.status.is_terminal());
     assert_eq!(blocked.status, TaskStatus::Blocked);

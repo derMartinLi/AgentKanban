@@ -1,8 +1,7 @@
-use crate::domain::{HarnessConfig, Project, Task, TaskLogEntry};
+use crate::domain::{HarnessConfig, Project, Task, TaskLogEntry, TaskTemplate};
 use anyhow::{Context, Result};
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -16,6 +15,7 @@ impl Storage {
         fs::create_dir_all(root.join("projects"))?;
         fs::create_dir_all(root.join("logs"))?;
         fs::create_dir_all(root.join("workspaces"))?;
+        fs::create_dir_all(root.join("templates"))?;
         Ok(Self { root })
     }
 
@@ -114,6 +114,30 @@ impl Storage {
         Ok(())
     }
 
+    pub fn load_task_templates(&self) -> Result<Vec<TaskTemplate>> {
+        let templates_dir = self.templates_dir();
+        fs::create_dir_all(&templates_dir)?;
+
+        let mut templates = Vec::new();
+        for entry in fs::read_dir(&templates_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let content = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read task template at {}", path.display()))?;
+
+            if let Some(template) = parse_task_template(&path, &content) {
+                templates.push(template);
+            }
+        }
+
+        templates.sort_by(|left, right| left.title.cmp(&right.title));
+        Ok(templates)
+    }
+
     pub fn append_log(&self, task_id: &str, entry: &TaskLogEntry) -> Result<()> {
         let path = self.log_path(task_id);
         self.ensure_parent(&path)?;
@@ -145,9 +169,9 @@ impl Storage {
     }
 
     pub fn create_workspace_dir(&self, task_id: &str) -> Result<PathBuf> {
-        let dir = self.root.join("workspaces").join(task_id);
-        fs::create_dir_all(&dir)?;
-        Ok(dir)
+        let workspaces_root = self.root.join("workspaces");
+        fs::create_dir_all(&workspaces_root)?;
+        Ok(workspaces_root.join(task_id))
     }
 
     pub fn discover_projects(&self, root_dir: &Path) -> Result<Vec<Project>> {
@@ -216,6 +240,10 @@ impl Storage {
         self.root.join("logs").join(format!("{task_id}.log"))
     }
 
+    fn templates_dir(&self) -> PathBuf {
+        self.root.join("templates")
+    }
+
     fn ensure_parent(&self, path: &Path) -> Result<()> {
         let parent = path.parent().context("missing parent directory")?;
         fs::create_dir_all(parent)?;
@@ -238,4 +266,35 @@ fn sanitize_key(value: &str) -> String {
 
 fn normalize_project_path(value: &str) -> String {
     value.replace('\\', "/").to_ascii_lowercase()
+}
+
+fn parse_task_template(path: &Path, content: &str) -> Option<TaskTemplate> {
+    let mut lines = content.lines();
+    let raw_title = lines.next()?.trim();
+    if raw_title.is_empty() {
+        return None;
+    }
+
+    let title = raw_title.trim_start_matches('#').trim().to_string();
+    if title.is_empty() {
+        return None;
+    }
+
+    let remainder = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+    let description = if remainder.is_empty() {
+        title.clone()
+    } else {
+        remainder
+    };
+    let id_source = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&title);
+
+    Some(TaskTemplate {
+        id: sanitize_key(id_source),
+        title,
+        description,
+    })
 }

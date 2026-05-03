@@ -13,14 +13,37 @@ fn create_workspace_keeps_source_and_real_origin_separate() {
     let source = root.join("source");
     let workspace = root.join("workspace");
 
-    git(&root, ["init", "--bare", "--initial-branch=main", upstream.to_string_lossy().as_ref()]);
-    git(&root, ["init", "--initial-branch=main", source.to_string_lossy().as_ref()]);
+    git(
+        &root,
+        [
+            "init",
+            "--bare",
+            "--initial-branch=main",
+            upstream.to_string_lossy().as_ref(),
+        ],
+    );
+    git(
+        &root,
+        [
+            "init",
+            "--initial-branch=main",
+            source.to_string_lossy().as_ref(),
+        ],
+    );
     git(&source, ["config", "user.name", "Test User"]);
     git(&source, ["config", "user.email", "test@example.com"]);
     fs::write(source.join("README.md"), "hello world\n").unwrap();
     git(&source, ["add", "README.md"]);
     git(&source, ["commit", "-m", "initial"]);
-    git(&source, ["remote", "add", "origin", upstream.to_string_lossy().as_ref()]);
+    git(
+        &source,
+        [
+            "remote",
+            "add",
+            "origin",
+            upstream.to_string_lossy().as_ref(),
+        ],
+    );
     git(&source, ["push", "-u", "origin", "main"]);
 
     git_ops::create_workspace(&source, &workspace, "main", "ai/test-branch").unwrap();
@@ -29,10 +52,16 @@ fn create_workspace_keeps_source_and_real_origin_separate() {
     assert_eq!(current_branch.trim(), "ai/test-branch");
 
     let source_remote = git(&workspace, ["remote", "get-url", "source"]);
-    assert_eq!(normalize_path(&source_remote), normalize_path(source.to_string_lossy().as_ref()));
+    assert_eq!(
+        normalize_path(&source_remote),
+        normalize_path(source.to_string_lossy().as_ref())
+    );
 
     let origin_remote = git(&workspace, ["remote", "get-url", "origin"]);
-    assert_eq!(normalize_path(&origin_remote), normalize_path(upstream.to_string_lossy().as_ref()));
+    assert_eq!(
+        normalize_path(&origin_remote),
+        normalize_path(upstream.to_string_lossy().as_ref())
+    );
 }
 
 fn git<I, S>(cwd: &Path, args: I) -> String

@@ -16,6 +16,7 @@ import {
   detectCliTools,
   getDefaultProjectsRoot,
   listRegisteredProjects,
+  listTaskTemplates,
   listTasks,
   loadHarnessConfig,
   loadTaskLogs,
@@ -26,6 +27,7 @@ import {
   startTask,
   subscribeToTaskEvents,
 } from './lib/backend';
+import type { TaskTemplate } from './lib/types';
 import { isTerminalTaskStatus } from './lib/types';
 import { getSelectedTask, getVisibleTasks, useAppStore } from './store/useAppStore';
 
@@ -75,6 +77,7 @@ function AppShell() {
   const [registrationError, setRegistrationError] = useState<string | null>(null);
   const [discoveredProjects, setDiscoveredProjects] = useState<typeof projects>([]);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
 
   const tasks = useMemo(
     () => getVisibleTasks({ currentProjectId, tasksByProject }),
@@ -255,6 +258,30 @@ function AppShell() {
       cancelled = true;
     };
   }, [appendTaskLog, selectedTask]);
+
+  useEffect(() => {
+    if (!createTaskOpen) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void listTaskTemplates()
+      .then((templates) => {
+        if (!cancelled) {
+          setTaskTemplates(templates);
+        }
+      })
+      .catch((error) => {
+        const nextError = error instanceof Error ? error.message : String(error);
+        setErrorMessage(nextError);
+        message.error(nextError);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [createTaskOpen, message, setErrorMessage]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -607,6 +634,7 @@ function AppShell() {
         }}
         open={createTaskOpen}
         projects={projects}
+        templates={taskTemplates}
       />
 
       <Drawer

@@ -70,6 +70,13 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskTemplate {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskQuestion {
     pub task_id: String,
     pub q: String,
@@ -99,6 +106,10 @@ pub struct HarnessConfig {
     pub max_retries: u32,
     #[serde(default)]
     pub review_command: String,
+    #[serde(default)]
+    pub semgrep_enabled: bool,
+    #[serde(default = "default_semgrep_config")]
+    pub semgrep_config: String,
     #[serde(default = "default_question_timeout")]
     pub question_timeout_secs: u64,
 }
@@ -112,6 +123,8 @@ impl Default for HarnessConfig {
             max_concurrency: default_max_concurrency(),
             max_retries: default_max_retries(),
             review_command: String::new(),
+            semgrep_enabled: false,
+            semgrep_config: default_semgrep_config(),
             question_timeout_secs: default_question_timeout(),
         }
     }
@@ -228,6 +241,10 @@ fn default_max_retries() -> u32 {
 
 fn default_question_timeout() -> u64 {
     120
+}
+
+fn default_semgrep_config() -> String {
+    "auto".into()
 }
 
 fn slugify(value: &str) -> String {

@@ -36,7 +36,7 @@ pub struct ProjectIdQuery {
 }
 
 #[derive(Deserialize)]
-pub struct RootDirQuery {
+pub struct RootDirBody {
     pub root_dir: String,
 }
 
@@ -100,9 +100,9 @@ pub async fn list_registered_projects(State(state): State<ServerState>) -> impl 
 
 pub async fn discover_projects(
     State(state): State<ServerState>,
-    Query(query): Query<RootDirQuery>,
+    Json(body): Json<RootDirBody>,
 ) -> impl IntoResponse {
-    match state.app_state.discover_projects(query.root_dir.as_ref()) {
+    match state.app_state.discover_projects(body.root_dir.as_ref()) {
         Ok(projects) => ok(projects),
         Err(e) => app_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

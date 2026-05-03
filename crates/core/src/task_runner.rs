@@ -57,7 +57,7 @@ impl AppState {
         Ok(Self::with_storage(Storage::default()?))
     }
 
-    fn with_storage(storage: Storage) -> Self {
+    pub fn with_storage(storage: Storage) -> Self {
         Self {
             storage,
             runtime: Arc::new(RuntimeState {

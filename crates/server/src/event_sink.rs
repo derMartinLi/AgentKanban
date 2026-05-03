@@ -6,6 +6,7 @@ use tokio::sync::broadcast;
 
 #[derive(Debug, Clone)]
 pub(crate) struct WsMessage {
+    pub(crate) project_id: String,
     pub(crate) payload: String,
 }
 
@@ -20,7 +21,7 @@ impl WsEventSink {
         Self { tx }
     }
 
-    pub fn sender(&self) -> broadcast::Sender<WsMessage> {
+    pub(crate) fn sender(&self) -> broadcast::Sender<WsMessage> {
         self.tx.clone()
     }
 }
@@ -32,6 +33,7 @@ impl TaskEventSink for WsEventSink {
             "task": task,
         });
         let _ = self.tx.send(WsMessage {
+            project_id: project_id.to_string(),
             payload: serde_json::to_string(&payload).unwrap_or_default(),
         });
     }
@@ -43,6 +45,7 @@ impl TaskEventSink for WsEventSink {
             "entry": entry,
         });
         let _ = self.tx.send(WsMessage {
+            project_id: project_id.to_string(),
             payload: serde_json::to_string(&payload).unwrap_or_default(),
         });
     }
@@ -50,13 +53,17 @@ impl TaskEventSink for WsEventSink {
 
 pub(crate) async fn handle_ws(
     socket: WebSocket,
-    _project_id: String,
+    project_id: String,
     mut rx: broadcast::Receiver<WsMessage>,
 ) {
     let (mut sender, mut receiver) = socket.split();
 
     let send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
+            if project_id != "all" && msg.project_id != project_id {
+                continue;
+            }
+
             if sender.send(Message::Text(msg.payload.into())).await.is_err() {
                 break;
             }

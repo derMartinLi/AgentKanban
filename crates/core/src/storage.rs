@@ -20,6 +20,10 @@ impl Storage {
     }
 
     pub fn default() -> Result<Self> {
+        if let Some(root) = env::var_os("AGENTKANBAN_STORAGE_ROOT") {
+            return Self::new(PathBuf::from(root));
+        }
+
         let home = env::var_os("USERPROFILE")
             .or_else(|| env::var_os("HOME"))
             .map(PathBuf::from)

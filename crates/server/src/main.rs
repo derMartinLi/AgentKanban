@@ -1,6 +1,6 @@
 use agentkanban_core::task_runner::AppState;
 use agentkanban_server::{app, build_state, find_static_dir};
-use std::net::SocketAddr;
+use std::{env, net::SocketAddr};
 use tracing_subscriber;
 
 #[tokio::main]
@@ -11,7 +11,11 @@ async fn main() {
     let static_dir = find_static_dir();
     let app = app(build_state(app_state), &static_dir);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 5577));
+    let port = env::var("AGENTKANBAN_SERVER_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(5577);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("AgentKanban server listening on http://{}", addr);
     tracing::info!("Serving static files from {}", static_dir.display());
 

@@ -281,12 +281,6 @@ impl AppState {
         reply: String,
     ) -> Result<Task> {
         let key = runtime_key(&project_id, &task_id);
-        if let Some(stdin) = self.runtime.stdin_handles.lock().await.get(&key).cloned() {
-            let mut stdin = stdin.lock().await;
-            stdin.write_all(reply.as_bytes()).await?;
-            stdin.write_all(b"\n").await?;
-            stdin.flush().await?;
-        }
         self.runtime.question_tokens.lock().await.remove(&key);
 
         let mut task = self.get_task(&project_id, &task_id)?;
@@ -294,6 +288,13 @@ impl AppState {
         task = task.transition(TaskStatus::Executing)?;
         self.save_task(&project_id, task.clone())?;
         self.emit_task_update(&sink, &project_id, &task);
+
+        if let Some(stdin) = self.runtime.stdin_handles.lock().await.get(&key).cloned() {
+            let mut stdin = stdin.lock().await;
+            stdin.write_all(reply.as_bytes()).await?;
+            stdin.write_all(b"\n").await?;
+            stdin.flush().await?;
+        }
         Ok(task)
     }
 
@@ -435,6 +436,9 @@ impl AppState {
             }
 
             let mut guarded = self.get_task(project_id, task_id)?;
+            if guarded.status != TaskStatus::Executing {
+                return Ok(());
+            }
             guarded = guarded.transition(TaskStatus::GuardrailCheck)?;
             self.save_task(project_id, guarded.clone())?;
             self.emit_task_update(sink, project_id, &guarded);
@@ -1246,6 +1250,85 @@ mod tests {
             .expect("read logs")
             .iter()
             .any(|(_, _, entry)| entry.stream == "system"));
+
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[tokio::test]
+    async fn question_timeout_ignores_answered_tasks() {
+        let (state, root) = build_test_state();
+        let task = Task::new(
+            "task-answered".into(),
+            "project-1".into(),
+            "Answered prompt".into(),
+            "Need operator input".into(),
+            "codex".into(),
+            Vec::new(),
+            "main".into(),
+        )
+        .transition(TaskStatus::Executing)
+        .expect("move task into executing state")
+        .transition(TaskStatus::WaitingForInput)
+        .expect("move task into waiting state");
+
+        let mut waiting_task = task.clone();
+        waiting_task.pending_question = Some(TaskQuestion {
+            task_id: waiting_task.id.clone(),
+            q: "Need approval".into(),
+            opts: vec!["yes".into()],
+            allow_freeform: true,
+        });
+
+        state
+            .storage
+            .save_tasks("project-1", &[waiting_task.clone()])
+            .expect("seed waiting task");
+
+        let key = runtime_key("project-1", &waiting_task.id);
+        state
+            .runtime
+            .question_tokens
+            .lock()
+            .await
+            .insert(key.clone(), "token-1".into());
+
+        let mut answered = waiting_task.transition(TaskStatus::Executing).expect("answer task");
+        answered.pending_question = None;
+        state
+            .save_task("project-1", answered.clone())
+            .expect("save answered task");
+
+        let sink = MockSink::default();
+        state
+            .handle_question_timeout(
+                sink.clone(),
+                "project-1".into(),
+                answered.id.clone(),
+                "token-1".into(),
+                0,
+            )
+            .await
+            .expect("handle question timeout");
+
+        let reloaded = state
+            .get_task("project-1", &answered.id)
+            .expect("reload answered task");
+        assert_eq!(reloaded.status, TaskStatus::Executing);
+        assert!(reloaded.latest_error.is_none());
+        assert!(reloaded.pending_question.is_none());
+        assert!(state
+            .storage
+            .read_logs(&answered.id)
+            .expect("read answered task logs")
+            .is_empty());
+        assert!(state
+            .runtime
+            .question_tokens
+            .lock()
+            .await
+            .get(&key)
+            .is_none());
+        assert!(sink.logs.lock().expect("read logs").is_empty());
 
         fs::remove_dir_all(root).expect("remove test storage");
     }

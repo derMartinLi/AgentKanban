@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { App as AntdApp, ConfigProvider, Drawer, Empty, Skeleton, theme as antdTheme } from 'antd';
-import { BellDot, FolderPlus, Plus, Search } from 'lucide-react';
+import { BellDot, FolderPlus, PanelLeftOpen, Plus, Search } from 'lucide-react';
 import { CreateTaskComposer } from './components/CreateTaskComposer';
 import { ProjectOnboardingPanel } from './components/ProjectOnboardingPanel';
 import { ProjectSidebar } from './components/ProjectSidebar';
@@ -32,6 +32,14 @@ import { isTerminalTaskStatus } from './lib/types';
 import { getSelectedTask, getVisibleTasks, useAppStore } from './store/useAppStore';
 
 function AppShell() {
+  const [isCompactLayout, setIsCompactLayout] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+
+    return window.matchMedia('(max-width: 900px)').matches;
+  });
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const { message } = AntdApp.useApp();
   const projects = useAppStore((state) => state.projects);
   const currentProjectId = useAppStore((state) => state.currentProjectId);
@@ -136,6 +144,29 @@ function AppShell() {
   const selectedWorkspaceLabel = selectedProject?.name ?? 'All Projects';
 
   useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 900px)');
+    const syncLayout = () => {
+      setIsCompactLayout(mediaQuery.matches);
+      if (!mediaQuery.matches) {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    syncLayout();
+    mediaQuery.addEventListener?.('change', syncLayout);
+    mediaQuery.addListener?.(syncLayout);
+
+    return () => {
+      mediaQuery.removeEventListener?.('change', syncLayout);
+      mediaQuery.removeListener?.(syncLayout);
+    };
+  }, []);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
   }, [themeMode]);
 
@@ -155,7 +186,7 @@ function AppShell() {
         }
         setProjectRoot(root);
 
-        const [cliTools, registeredProjects] = await Promise.all([detectCliTools(), listRegisteredProjects(root)]);
+        const [cliTools, registeredProjects] = await Promise.all([detectCliTools(), listRegisteredProjects()]);
         if (cancelled) {
           return;
         }
@@ -374,33 +405,59 @@ function AppShell() {
     setDetailPanelOpen(true);
   };
 
+  const sidebar = (
+    <ProjectSidebar
+      collapsed={isCompactLayout ? false : sidebarCollapsed}
+      currentProjectId={currentProjectId}
+      onOpenOnboarding={() => {
+        setOnboardingOpen(true);
+        setMobileSidebarOpen(false);
+      }}
+      onOpenSettings={() => {
+        setActivePanel('settings');
+        setDetailPanelOpen(true);
+        setMobileSidebarOpen(false);
+      }}
+      onSelectProject={(projectId) => {
+        selectProject(projectId);
+        setDiffMode(false);
+        setMobileSidebarOpen(false);
+      }}
+      onToggleCollapsed={() => {
+        if (isCompactLayout) {
+          setMobileSidebarOpen(false);
+          return;
+        }
+
+        setSidebarCollapsed(!sidebarCollapsed);
+      }}
+      onToggleTheme={toggleTheme}
+      projectTaskStats={projectTaskStats}
+      projects={projects}
+      promptCount={promptCount}
+      theme={themeMode}
+      totalActiveTaskCount={activeTaskCount}
+      totalTaskCount={allTasks.length}
+    />
+  );
+
   return (
     <div className={detailPanelOpen ? 'app-shell app-shell--detail-open' : 'app-shell'}>
-      <ProjectSidebar
-        collapsed={sidebarCollapsed}
-        currentProjectId={currentProjectId}
-        onOpenOnboarding={() => setOnboardingOpen(true)}
-        onOpenSettings={() => {
-          setActivePanel('settings');
-          setDetailPanelOpen(true);
-        }}
-        onSelectProject={(projectId) => {
-          selectProject(projectId);
-          setDiffMode(false);
-        }}
-        onToggleCollapsed={() => setSidebarCollapsed(!sidebarCollapsed)}
-        onToggleTheme={toggleTheme}
-        projectTaskStats={projectTaskStats}
-        projects={projects}
-        promptCount={promptCount}
-        theme={themeMode}
-        totalActiveTaskCount={activeTaskCount}
-        totalTaskCount={allTasks.length}
-      />
+      {!isCompactLayout ? sidebar : null}
 
       <main className="workspace-shell">
         <header className="workspace-topbar">
           <div className="workspace-topbar__title">
+            {isCompactLayout ? (
+              <button
+                aria-label="Open sidebar"
+                className="icon-button mobile-sidebar-trigger"
+                onClick={() => setMobileSidebarOpen(true)}
+                type="button"
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            ) : null}
             <span className="workspace-title__eyebrow">Agent Kanban</span>
             <h1>{selectedWorkspaceLabel}</h1>
           </div>
@@ -636,6 +693,17 @@ function AppShell() {
         projects={projects}
         templates={taskTemplates}
       />
+
+      <Drawer
+        className="sidebar-drawer"
+        closable={false}
+        onClose={() => setMobileSidebarOpen(false)}
+        open={isCompactLayout && mobileSidebarOpen}
+        placement="left"
+        width={280}
+      >
+        {sidebar}
+      </Drawer>
 
       <Drawer
         className="onboarding-drawer"

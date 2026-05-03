@@ -1,12 +1,10 @@
-use crate::domain::{Task, TaskLogEntry, TaskStatus};
+use agentkanban_core::{
+    domain::{Task, TaskLogEntry, TaskStatus},
+    events::TaskEventSink,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
-
-pub trait TaskEventSink: Clone + Send + Sync + 'static {
-    fn task_updated(&self, project_id: &str, task: &Task);
-    fn task_log(&self, project_id: &str, task_id: &str, entry: &TaskLogEntry);
-}
 
 #[derive(Debug, Clone)]
 pub struct TauriEventSink {
@@ -105,6 +103,7 @@ fn notification_for_task(task: &Task) -> Option<TaskNotification> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentkanban_core::domain::Task;
 
     #[test]
     fn notification_mapping_only_targets_operator_attention_states() {

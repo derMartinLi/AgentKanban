@@ -1,4 +1,4 @@
-use app_lib::git_ops;
+use agentkanban_core::git_ops;
 use std::{
     fs,
     path::{Path, PathBuf},

@@ -1,0 +1,133 @@
+- generic [ref=e4]:
+  - complementary [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]: AI
+        - generic [ref=e9]:
+          - strong [ref=e10]: AI Task
+          - paragraph [ref=e11]: Developer control center
+      - generic [ref=e12]:
+        - button [ref=e13] [cursor=pointer]:
+          - img [ref=e14]
+        - button [ref=e17] [cursor=pointer]:
+          - img [ref=e18]
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]: Running
+        - strong [ref=e22]: "0"
+      - generic [ref=e23]:
+        - generic [ref=e24]: Total
+        - strong [ref=e25]: "0"
+      - generic [ref=e26]:
+        - generic [ref=e27]: Waiting
+        - strong [ref=e28]: "0"
+    - generic [ref=e29]:
+      - generic [ref=e30]: Projects
+      - button "All Projects 0 tasks · 0 running" [ref=e31] [cursor=pointer]:
+        - img [ref=e33]
+        - generic [ref=e38]:
+          - strong [ref=e39]: All Projects
+          - generic [ref=e40]: 0 tasks · 0 running
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]: Light theme
+        - switch "Toggle theme" [ref=e44] [cursor=pointer]:
+          - generic [ref=e46]:
+            - generic:
+              - img
+            - generic:
+              - img
+      - generic [ref=e47]:
+        - button [ref=e48] [cursor=pointer]:
+          - img [ref=e49]
+        - button [ref=e52] [cursor=pointer]:
+          - img [ref=e53]
+  - main [ref=e56]:
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - generic [ref=e59]: Agent Kanban
+        - heading "All Projects" [level=1] [ref=e60]
+      - generic [ref=e61]:
+        - generic "Search tasks" [ref=e62]:
+          - img [ref=e63]
+          - textbox "Search tasks" [ref=e66]:
+            - /placeholder: Search tasks, branches, files
+        - button "Link Repo" [ref=e67] [cursor=pointer]:
+          - img [ref=e68]
+          - generic [ref=e70]: Link Repo
+        - button "New Task" [ref=e71] [cursor=pointer]:
+          - img [ref=e72]
+          - generic [ref=e73]: New Task
+    - generic [ref=e74]:
+      - img [ref=e75]
+      - generic [ref=e79]: HTTP 500
+    - generic [ref=e82]:
+      - generic [ref=e83]:
+        - generic [ref=e84]: Link Repository
+        - heading "Attach a git workspace" [level=2] [ref=e85]
+        - paragraph [ref=e86]: Every project in Agent Kanban is backed by a git repository so tasks can copy the repo, branch safely, and flow through review and acceptance.
+      - generic [ref=e87]:
+        - generic [ref=e88]:
+          - img [ref=e89]
+          - generic [ref=e91]:
+            - generic [ref=e92]: Linked repos
+            - strong [ref=e93]: "0"
+        - generic [ref=e94]:
+          - img [ref=e95]
+          - generic [ref=e99]:
+            - generic [ref=e100]: Discovery root
+            - strong [ref=e101]: Set by desktop runtime
+      - generic [ref=e102]:
+        - generic [ref=e103]:
+          - generic [ref=e104]: Directory to scan
+          - textbox "Directory to scan" [ref=e105]:
+            - /placeholder: C:/repos
+        - button "Scan Directory" [disabled] [ref=e106]:
+          - img [ref=e107]
+          - generic [ref=e110]: Scan Directory
+      - generic [ref=e111]:
+        - generic [ref=e112]:
+          - generic [ref=e113]: Git repository path
+          - textbox "Git repository path" [ref=e114]:
+            - /placeholder: C:/repos/your-project
+        - paragraph [ref=e115]: We verify branch and remote metadata up front so later task dispatch stays predictable.
+        - button "Link Repository" [disabled] [ref=e116]:
+          - img [ref=e117]
+          - generic [ref=e120]: Link Repository
+  - complementary:
+    - generic:
+      - generic:
+        - generic:
+          - generic: Task Details
+          - heading "Inspector" [level=2]
+          - generic:
+            - generic: Closed
+        - button "Close details panel":
+          - img
+      - generic:
+        - tablist:
+          - generic:
+            - generic:
+              - generic:
+                - tab "Overview" [selected]
+              - generic:
+                - tab "Terminal"
+              - generic:
+                - tab "Changes"
+              - generic:
+                - tab "Settings"
+          - generic:
+            - button "ellipsis":
+              - img "ellipsis":
+                - img
+        - generic:
+          - generic:
+            - tabpanel "Overview"
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - img "No data"
+            - generic: Select a task to inspect metadata and review context.
+  - button [ref=e121] [cursor=pointer]:
+    - img [ref=e122]

@@ -1,10 +1,7 @@
 pub mod commands;
-pub mod domain;
 pub mod events;
-pub mod git_ops;
-pub mod harness;
-pub mod storage;
-pub mod task_runner;
+
+use agentkanban_core::task_runner;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

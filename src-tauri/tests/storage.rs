@@ -1,5 +1,5 @@
-use app_lib::domain::{HarnessConfig, Project, Task};
-use app_lib::storage::Storage;
+use agentkanban_core::domain::{HarnessConfig, Project, Task};
+use agentkanban_core::storage::Storage;
 use std::{
     fs,
     path::PathBuf,

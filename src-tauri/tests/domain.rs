@@ -1,4 +1,4 @@
-use app_lib::domain::{Task, TaskStatus};
+use agentkanban_core::domain::{Task, TaskStatus};
 
 fn make_test_task(id: &str) -> Task {
     Task::new(

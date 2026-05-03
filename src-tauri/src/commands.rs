@@ -1,6 +1,6 @@
-use crate::{
+use crate::events::TauriEventSink;
+use agentkanban_core::{
     domain::{HarnessConfig, Project, Task, TaskLogEntry, TaskTemplate},
-    events::TauriEventSink,
     task_runner::{AppState, CreateTaskInput},
 };
 use tauri::{AppHandle, State};

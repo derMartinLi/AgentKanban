@@ -31,6 +31,18 @@ import type { TaskTemplate } from './lib/types';
 import { isTerminalTaskStatus } from './lib/types';
 import { getSelectedTask, getVisibleTasks, useAppStore } from './store/useAppStore';
 
+const BROWSER_PREVIEW_PROJECT_ROOT = 'Browser preview mode';
+const BROWSER_PREVIEW_CLI_TOOLS = ['codex', 'copilot'];
+
+function isBrowserPreviewBootstrapFailure(error: unknown): boolean {
+  if (typeof window === 'undefined' || '__TAURI_INTERNALS__' in window) {
+    return false;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /http\s+(404|500)|failed to fetch|networkerror|unexpected token/i.test(message);
+}
+
 function AppShell() {
   const [isCompactLayout, setIsCompactLayout] = useState(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -140,7 +152,7 @@ function AppShell() {
     [projects],
   );
   const promptCount = useMemo(() => allTasks.filter((task) => task.pendingQuestion).length, [allTasks]);
-  const isBrowserPreviewMode = projectRoot === 'Browser preview mode';
+  const isBrowserPreviewMode = projectRoot === BROWSER_PREVIEW_PROJECT_ROOT;
   const selectedWorkspaceLabel = selectedProject?.name ?? 'All Projects';
 
   useEffect(() => {
@@ -208,6 +220,15 @@ function AppShell() {
         );
         setBootstrapped(true);
       } catch (error) {
+        if (isBrowserPreviewBootstrapFailure(error)) {
+          setProjectRoot(BROWSER_PREVIEW_PROJECT_ROOT);
+          setAvailableCliTools(BROWSER_PREVIEW_CLI_TOOLS);
+          hydrateProjects([]);
+          setErrorMessage(null);
+          setBootstrapped(true);
+          return;
+        }
+
         const nextError = error instanceof Error ? error.message : String(error);
         setErrorMessage(nextError);
         message.error(nextError);
@@ -236,6 +257,10 @@ function AppShell() {
   ]);
 
   useEffect(() => {
+    if (!isBootstrapped || isBrowserPreviewMode) {
+      return undefined;
+    }
+
     let disposed = false;
     let unlisten: () => void = () => {};
 
@@ -270,7 +295,16 @@ function AppShell() {
       disposed = true;
       unlisten();
     };
-  }, [activeQuestion?.taskId, appendTaskLog, dismissQuestion, selectedTaskId, setActiveQuestion, upsertTask]);
+  }, [
+    activeQuestion?.taskId,
+    appendTaskLog,
+    dismissQuestion,
+    isBootstrapped,
+    isBrowserPreviewMode,
+    selectedTaskId,
+    setActiveQuestion,
+    upsertTask,
+  ]);
 
   useEffect(() => {
     if (!selectedTask) {
@@ -700,7 +734,6 @@ function AppShell() {
         onClose={() => setMobileSidebarOpen(false)}
         open={isCompactLayout && mobileSidebarOpen}
         placement="left"
-        width={280}
       >
         {sidebar}
       </Drawer>

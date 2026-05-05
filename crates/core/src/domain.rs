@@ -33,6 +33,7 @@ impl TaskStatus {
                 | (S::WaitingForInput, S::Executing)
                 | (S::WaitingForInput, S::Failed)
                 | (S::WaitingForInput, S::Blocked)
+                | (S::GuardrailCheck, S::WaitingForInput)
                 | (S::GuardrailCheck, S::NeedsRevision)
                 | (S::GuardrailCheck, S::AiReview)
                 | (S::GuardrailCheck, S::Blocked)
@@ -263,5 +264,15 @@ fn slugify(value: &str) -> String {
         "task".to_string()
     } else {
         slug.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskStatus;
+
+    #[test]
+    fn guardrail_check_can_request_operator_input() {
+        assert!(TaskStatus::GuardrailCheck.can_transition_to(&TaskStatus::WaitingForInput));
     }
 }

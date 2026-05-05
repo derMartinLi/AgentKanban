@@ -2,6 +2,7 @@
   "name": "agent-kanban",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@10.33.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +12,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:smoke:http": "node ./scripts/setup-http-smoke.mjs && playwright test tests/browser/http-smoke.spec.ts",
+    "test:smoke:docker": "docker compose up --build --abort-on-container-exit --exit-code-from e2e e2e",
     "test:ui": "vitest run src/lib/types.test.ts",
     "tauri": "node ./scripts/tauri-wrapper.mjs"
   },

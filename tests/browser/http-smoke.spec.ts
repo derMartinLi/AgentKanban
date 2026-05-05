@@ -36,8 +36,9 @@ test('browser mode smoke covers HTTP + WebSocket task flow', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Apply generated change?' })).toBeVisible();
   await page.getByRole('button', { name: /^approve$/ }).click();
 
-  await expect(page.getByRole('button', { name: 'Approve' })).toBeEnabled();
-  await page.getByRole('button', { name: 'Approve' }).click();
+  const approveTaskButton = page.locator('.detail-panel__actions').getByRole('button', { name: /^Approve$/i });
+  await expect(approveTaskButton).toBeEnabled();
+  await approveTaskButton.click();
   await expect(page.getByText(/^COMPLETED$/).first()).toBeVisible();
 
   await expect.poll(() => readNormalized(manifest.expectedFeatureFile)).toBe('approved change\n');

@@ -53,7 +53,7 @@ function seedHarnessConfig() {
         guardrail_commands: [],
         max_concurrency: 2,
         max_retries: 2,
-        review_command: `node \"${normalizePath(reviewScript)}\"`,
+        review_command: `node "${normalizePath(reviewScript)}"`,
         semgrep_enabled: false,
         semgrep_config: 'auto',
         question_timeout_secs: 5,

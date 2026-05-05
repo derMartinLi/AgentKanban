@@ -1,0 +1,60 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      AGENTKANBAN_SERVER_PORT: 5577
+      AGENTKANBAN_STORAGE_ROOT: /workspace/.tmp/http-smoke/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5577/api/projects/root').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    ports:
+      - "5577:5577"
+    volumes:
+      - .:/workspace
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    ports:
+      - "8080:80"
+
+  e2e:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    depends_on:
+      frontend:
+        condition: service_healthy
+    environment:
+      PLAYWRIGHT_BASE_URL: http://frontend
+    ipc: host
+    shm_size: 1gb
+    volumes:
+      - .:/workspace
+      - /workspace/node_modules
+    working_dir: /workspace
+    command: >
+      bash -lc "pnpm install --frozen-lockfile
+      && node ./scripts/setup-http-smoke.mjs
+      && pnpm exec playwright test tests/browser/http-smoke.spec.ts --config playwright.docker.config.ts"

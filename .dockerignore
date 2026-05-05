@@ -1,0 +1,8 @@
+.git
+.tmp
+dist
+node_modules
+test-results
+target
+src-tauri/target
+**/target

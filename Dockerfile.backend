@@ -1,0 +1,38 @@
+FROM node:20-bookworm AS web-builder
+
+WORKDIR /app
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml tsconfig.json vite.config.ts index.html ./
+COPY src ./src
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm build
+
+FROM rust:bookworm AS backend-builder
+
+WORKDIR /app
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY src-tauri ./src-tauri
+
+RUN cargo build -p agentkanban-server --release
+
+FROM rust:bookworm
+
+WORKDIR /app
+
+COPY --from=web-builder /app/dist ./dist
+COPY --from=backend-builder /app/target/release/agentkanban-server /usr/local/bin/agentkanban-server
+COPY --from=node:20-bookworm /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:20-bookworm /usr/local/lib/node_modules /usr/local/lib/node_modules
+
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+ENV AGENTKANBAN_SERVER_PORT=5577
+
+EXPOSE 5577
+
+CMD ["agentkanban-server"]

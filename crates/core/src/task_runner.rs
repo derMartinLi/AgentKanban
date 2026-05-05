@@ -352,7 +352,9 @@ impl AppState {
         task_id: String,
     ) -> Result<()> {
         let key = runtime_key(&project_id, &task_id);
-        self.acquire_slot(&key).await;
+        if !self.acquire_slot(&key).await {
+            return Ok(());
+        }
 
         let result = self.run_task_inner(&sink, &project_id, &task_id).await;
 
@@ -712,17 +714,17 @@ impl AppState {
         }
     }
 
-    async fn acquire_slot(&self, key: &str) {
+    async fn acquire_slot(&self, key: &str) -> bool {
         loop {
             {
                 let mut active = self.runtime.active_tasks.lock().await;
                 let max_concurrency = *self.runtime.max_concurrency.lock().await;
                 if active.contains(key) {
-                    return;
+                    return false;
                 }
                 if active.len() < max_concurrency {
                     active.insert(key.to_string());
-                    return;
+                    return true;
                 }
             }
 

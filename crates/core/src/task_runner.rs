@@ -518,9 +518,9 @@ impl AppState {
         question_timeout_secs: u64,
     ) -> Result<bool> {
         let mut command = Command::new(&task.cli_command);
+        let invocation_args = build_cli_invocation_args(&task.cli_command, &task.cli_args, Some(&prompt));
         command
-            .args(&task.cli_args)
-            .arg(prompt)
+            .args(&invocation_args)
             .current_dir(workspace_path)
             .envs(env_vars)
             .env("AGENTKANBAN_TASK_ID", &task.id)
@@ -929,16 +929,13 @@ async fn run_direct_command(
     prompt: Option<String>,
 ) -> Result<CommandOutput> {
     let mut command = Command::new(program);
+    let invocation_args = build_cli_invocation_args(program, args, prompt.as_deref());
     command
         .current_dir(cwd)
-        .args(args)
+        .args(&invocation_args)
         .envs(env_vars)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
-    if let Some(prompt) = prompt {
-        command.arg(prompt);
-    }
 
     let output = command.output().await?;
     Ok(CommandOutput {
@@ -994,6 +991,50 @@ async fn command_exists(command_name: &str) -> bool {
 
 fn looks_like_path(value: &str) -> bool {
     value.contains('\\') || value.contains('/') || value.contains(':')
+}
+
+fn build_cli_invocation_args(
+    program: &str,
+    args: &[String],
+    prompt: Option<&str>,
+) -> Vec<String> {
+    let mut invocation_args = args.to_vec();
+
+    let Some(prompt) = prompt else {
+        return invocation_args;
+    };
+
+    if is_copilot_cli(program) {
+        if !invocation_args
+            .iter()
+            .any(|arg| arg == "-p" || arg == "--prompt")
+        {
+            invocation_args.push("--prompt".into());
+            invocation_args.push(prompt.to_string());
+        }
+
+        if !invocation_args
+            .iter()
+            .any(|arg| arg == "--allow-all" || arg == "--allow-all-tools")
+        {
+            invocation_args.push("--allow-all-tools".into());
+        }
+
+        return invocation_args;
+    }
+
+    invocation_args.push(prompt.to_string());
+    invocation_args
+}
+
+fn is_copilot_cli(program: &str) -> bool {
+    let executable = Path::new(program)
+        .file_stem()
+        .or_else(|| Path::new(program).file_name())
+        .and_then(|value| value.to_str())
+        .unwrap_or(program);
+
+    executable.eq_ignore_ascii_case("copilot")
 }
 
 fn create_task_title(description: &str) -> String {
@@ -1636,6 +1677,40 @@ mod tests {
 
     fn normalize_test_path(value: &str) -> String {
         value.trim().replace('\\', "/").to_ascii_lowercase()
+    }
+
+    #[test]
+    fn copilot_cli_uses_prompt_flag_and_auto_approval() {
+        let args = build_cli_invocation_args(
+            "copilot",
+            &[String::from("--model"), String::from("gpt-5-mini")],
+            Some("Summarize technical debt"),
+        );
+
+        assert_eq!(
+            args,
+            vec![
+                String::from("--model"),
+                String::from("gpt-5-mini"),
+                String::from("--prompt"),
+                String::from("Summarize technical debt"),
+                String::from("--allow-all-tools"),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_copilot_cli_keeps_positional_prompt() {
+        let args = build_cli_invocation_args(
+            "node",
+            &[String::from("agent.js")],
+            Some("Implement feature"),
+        );
+
+        assert_eq!(
+            args,
+            vec![String::from("agent.js"), String::from("Implement feature")]
+        );
     }
 
     fn fake_agent_script() -> &'static str {

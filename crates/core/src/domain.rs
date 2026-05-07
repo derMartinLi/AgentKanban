@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use crate::error::{AppError, AppResult};
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -208,13 +208,12 @@ impl Task {
         }
     }
 
-    pub fn transition(&self, next: TaskStatus) -> Result<Self> {
+    pub fn transition(&self, next: TaskStatus) -> AppResult<Self> {
         if !self.status.can_transition_to(&next) {
-            return Err(anyhow!(
-                "illegal status transition: {:?} -> {:?}",
-                self.status,
-                next
-            ));
+            return Err(AppError::IllegalTransition {
+                from: self.status.clone(),
+                to: next,
+            });
         }
 
         let mut updated = self.clone();

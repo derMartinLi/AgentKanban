@@ -1,0 +1,674 @@
+openapi: 3.1.0
+info:
+  title: AgentKanban Phase 1 HTTP Contract
+  version: 0.1.0-phase1
+  description: >-
+    Phase 1 baseline contract for AgentKanban's current HTTP control plane.
+    This spec captures the existing project/task/config routes, the structured
+    response envelope, and the deprecated compatibility role of create_task.project_path.
+servers:
+  - url: http://localhost:3000
+paths:
+  /api/projects/root:
+    get:
+      operationId: getDefaultProjectsRoot
+      responses:
+        '200':
+          description: Default projects root.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RootEnvelope'
+  /api/cli-tools:
+    get:
+      operationId: detectCliTools
+      responses:
+        '200':
+          description: Detected CLI tools available on the host.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CliToolsEnvelope'
+  /api/projects/discover:
+    post:
+      operationId: discoverProjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverProjectsRequest'
+      responses:
+        '200':
+          description: Candidate repositories discovered under the requested root.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/projects/registered:
+    get:
+      operationId: listRegisteredProjects
+      responses:
+        '200':
+          description: Linked projects that still satisfy current origin validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/projects/register:
+    post:
+      operationId: linkProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterProjectRequest'
+      responses:
+        '200':
+          description: Linked project metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/templates:
+    get:
+      operationId: listTaskTemplates
+      responses:
+        '200':
+          description: Available task templates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskTemplateListEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/tasks:
+    get:
+      operationId: listTasks
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdQuery'
+      responses:
+        '200':
+          description: Tasks scoped to a linked project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+    post:
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '200':
+          description: Created task snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/tasks/{task_id}:
+    get:
+      operationId: getTask
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPath'
+        - $ref: '#/components/parameters/ProjectIdQuery'
+      responses:
+        '200':
+          description: Task snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/tasks/{task_id}/start:
+    post:
+      operationId: startTask
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPath'
+        - $ref: '#/components/parameters/ProjectIdQuery'
+      responses:
+        '200':
+          description: Task accepted for asynchronous execution.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/tasks/{task_id}/retry:
+    post:
+      operationId: retryTask
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPath'
+        - $ref: '#/components/parameters/ProjectIdQuery'
+      responses:
+        '200':
+          description: Task snapshot after retry scheduling.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/tasks/{task_id}/answer:
+    post:
+      operationId: answerTaskQuestion
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerQuestionRequest'
+      responses:
+        '200':
+          description: Task snapshot after resuming execution.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/tasks/{task_id}/approve:
+    post:
+      operationId: approveTask
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveTaskRequest'
+      responses:
+        '200':
+          description: Task snapshot after approval/merge.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/tasks/{task_id}/reject:
+    post:
+      operationId: rejectTask
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectTaskRequest'
+      responses:
+        '200':
+          description: Task snapshot after appending revision feedback.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/tasks/{task_id}/logs:
+    get:
+      operationId: getTaskLogs
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPath'
+      responses:
+        '200':
+          description: Append-only task logs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskLogListEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/config/{project_id}:
+    get:
+      operationId: getHarnessConfig
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+      responses:
+        '200':
+          description: Stored harness configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HarnessConfigEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+    put:
+      operationId: saveHarnessConfig
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HarnessConfig'
+      responses:
+        '200':
+          description: Persisted harness configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HarnessConfigEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+components:
+  parameters:
+    ProjectIdQuery:
+      name: project_id
+      in: query
+      required: true
+      schema:
+        type: string
+    ProjectIdPath:
+      name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    TaskIdPath:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    ErrorResponse:
+      description: Structured error envelope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    Meta:
+      type: object
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      required: [error, meta]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_request
+                - project_not_found
+                - project_not_linked
+                - project_missing_origin_remote
+                - project_path_mismatch
+                - task_not_found
+                - illegal_transition
+                - command_failed
+                - permission_denied
+                - internal_error
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+        meta:
+          $ref: '#/components/schemas/Meta'
+    RootEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [root]
+          properties:
+            root:
+              type: string
+        meta:
+          $ref: '#/components/schemas/Meta'
+    CliToolsEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [tools]
+          properties:
+            tools:
+              type: array
+              items:
+                type: string
+        meta:
+          $ref: '#/components/schemas/Meta'
+    ProjectEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/Project'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    ProjectListEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    TaskEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/Task'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    TaskListEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    TaskTemplateListEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskTemplate'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    TaskLogListEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskLogEntry'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    HarnessConfigEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/HarnessConfig'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    StatusEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [started]
+        meta:
+          $ref: '#/components/schemas/Meta'
+    DiscoverProjectsRequest:
+      type: object
+      required: [root_dir]
+      properties:
+        root_dir:
+          type: string
+    RegisterProjectRequest:
+      type: object
+      required: [project_path]
+      properties:
+        project_path:
+          type: string
+    CreateTaskRequest:
+      type: object
+      required:
+        - project_id
+        - base_branch
+        - description
+        - cli_command
+      properties:
+        project_id:
+          type: string
+          description: Canonical linked project selector.
+        project_path:
+          type: string
+          deprecated: true
+          description: >-
+            Compatibility field accepted during the migration window. When provided,
+            it must match the linked project's stored path.
+        base_branch:
+          type: string
+        description:
+          type: string
+        cli_command:
+          type: string
+        cli_args:
+          type: array
+          items:
+            type: string
+          default: []
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+    AnswerQuestionRequest:
+      type: object
+      required: [project_id, reply]
+      properties:
+        project_id:
+          type: string
+        reply:
+          type: string
+    ApproveTaskRequest:
+      type: object
+      required: [project_id]
+      properties:
+        project_id:
+          type: string
+    RejectTaskRequest:
+      type: object
+      required: [project_id, feedback]
+      properties:
+        project_id:
+          type: string
+        feedback:
+          type: string
+    Project:
+      type: object
+      required: [id, name, path, default_branch, is_linked]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        default_branch:
+          type: string
+        is_linked:
+          type: boolean
+        remote_url:
+          type: string
+    Task:
+      type: object
+      required:
+        - id
+        - project_id
+        - title
+        - description
+        - status
+        - cli_command
+        - cli_args
+        - env_vars
+        - feedback_history
+        - revision_count
+        - branch_name
+        - base_branch
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        project_path:
+          type: string
+          description: Compatibility field retained during the project_id migration window.
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        cli_command:
+          type: string
+        cli_args:
+          type: array
+          items:
+            type: string
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+        feedback_history:
+          type: array
+          items:
+            type: string
+        revision_count:
+          type: integer
+        branch_name:
+          type: string
+        base_branch:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        review:
+          type: string
+        diff:
+          type: string
+          description: Deprecated compatibility field; a dedicated task_diff resource is planned.
+        latest_error:
+          type: string
+        workspace_path:
+          type: string
+        remote_branch:
+          type: string
+        latest_guardrail_report:
+          type: string
+        pending_question:
+          $ref: '#/components/schemas/TaskQuestion'
+    TaskQuestion:
+      type: object
+      required: [task_id, q, opts, allow_freeform]
+      properties:
+        task_id:
+          type: string
+        q:
+          type: string
+        opts:
+          type: array
+          items:
+            type: string
+        allow_freeform:
+          type: boolean
+    TaskLogEntry:
+      type: object
+      required: [timestamp, stream, message]
+      properties:
+        timestamp:
+          type: string
+        stream:
+          type: string
+          enum: [stdout, stderr, system]
+        message:
+          type: string
+    TaskTemplate:
+      type: object
+      required: [id, title, description]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+    HarnessConfig:
+      type: object
+      required:
+        - env_vars
+        - resource_files
+        - guardrail_commands
+        - max_concurrency
+        - max_retries
+        - review_command
+        - semgrep_enabled
+        - semgrep_config
+        - question_timeout_secs
+      properties:
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+        resource_files:
+          type: array
+          items:
+            type: string
+        guardrail_commands:
+          type: array
+          items:
+            type: string
+        max_concurrency:
+          type: integer
+        max_retries:
+          type: integer
+        review_command:
+          type: string
+        semgrep_enabled:
+          type: boolean
+        semgrep_config:
+          type: string
+        question_timeout_secs:
+          type: integer
+    TaskStatus:
+      type: string
+      enum:
+        - PENDING
+        - EXECUTING
+        - WAITING_FOR_INPUT
+        - GUARDRAIL_CHECK
+        - NEEDS_REVISION
+        - BLOCKED
+        - AI_REVIEW
+        - AWAITING_ACCEPTANCE
+        - FAILED
+        - COMPLETED

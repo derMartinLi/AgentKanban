@@ -3,6 +3,7 @@ use crate::{
         timestamp_now, HarnessConfig, Project, Task, TaskLogEntry, TaskQuestion, TaskStatus,
         TaskTemplate,
     },
+    error::{AppError, AppResult},
     events::TaskEventSink,
     git_ops,
     harness::build_harness_payload,
@@ -42,7 +43,8 @@ struct RuntimeState {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateTaskInput {
     pub project_id: String,
-    pub project_path: String,
+    #[serde(default)]
+    pub project_path: Option<String>,
     pub base_branch: String,
     pub description: String,
     pub cli_command: String,
@@ -93,7 +95,7 @@ impl AppState {
         found
     }
 
-    pub fn list_registered_projects(&self) -> Result<Vec<Project>> {
+    pub fn list_registered_projects(&self) -> AppResult<Vec<Project>> {
         let mut projects = self.storage.load_registered_projects()?;
         for project in &mut projects {
             project.is_linked = true;
@@ -112,11 +114,11 @@ impl AppState {
         Ok(projects)
     }
 
-    pub fn find_projects(&self, _root_dir: &Path) -> Result<Vec<Project>> {
+    pub fn find_projects(&self, _root_dir: &Path) -> AppResult<Vec<Project>> {
         self.list_registered_projects()
     }
 
-    pub fn discover_projects(&self, root_dir: &Path) -> Result<Vec<Project>> {
+    pub fn discover_projects(&self, root_dir: &Path) -> AppResult<Vec<Project>> {
         let registered_paths = self
             .storage
             .load_registered_projects()?
@@ -140,15 +142,17 @@ impl AppState {
         Ok(projects)
     }
 
-    pub fn register_project(&self, project_path: &Path) -> Result<Project> {
+    pub fn register_project(&self, project_path: &Path) -> AppResult<Project> {
         if !project_path.exists() || !project_path.is_dir() {
-            return Err(anyhow!(
-                "repository path does not exist or is not a directory"
+            return Err(AppError::invalid_request(
+                "repository path does not exist or is not a directory",
             ));
         }
 
         if !project_path.join(".git").exists() {
-            return Err(anyhow!("project must point to a git repository"));
+            return Err(AppError::invalid_request(
+                "project must point to a git repository",
+            ));
         }
 
         let name = project_path
@@ -158,8 +162,11 @@ impl AppState {
             .unwrap_or("project")
             .to_string();
 
-        let remote_url = git_ops::origin_remote_url(project_path)
-            .context("project must have an origin remote to support collaboration flows")?;
+        let remote_url = git_ops::origin_remote_url(project_path).map_err(|_| {
+            AppError::ProjectMissingOriginRemote {
+                project_path: project_path.to_string_lossy().to_string(),
+            }
+        })?;
 
         let project = Project {
             id: project_id_from_path(project_path),
@@ -174,57 +181,51 @@ impl AppState {
         Ok(project)
     }
 
-    pub fn list_tasks(&self, project_id: &str) -> Result<Vec<Task>> {
-        self.storage.load_tasks(project_id)
+    pub fn list_tasks(&self, project_id: &str) -> AppResult<Vec<Task>> {
+        Ok(self.storage.load_tasks(project_id)?)
     }
 
-    pub fn load_task_logs(&self, task_id: &str) -> Result<Vec<TaskLogEntry>> {
-        self.storage.read_logs(task_id)
+    pub fn load_task_logs(&self, task_id: &str) -> AppResult<Vec<TaskLogEntry>> {
+        Ok(self.storage.read_logs(task_id)?)
     }
 
-    pub fn get_task(&self, project_id: &str, task_id: &str) -> Result<Task> {
+    pub fn get_task(&self, project_id: &str, task_id: &str) -> AppResult<Task> {
         let tasks = self.storage.load_tasks(project_id)?;
         tasks
             .into_iter()
             .find(|task| task.id == task_id)
-            .context("task not found")
+            .ok_or_else(|| AppError::TaskNotFound {
+                task_id: task_id.to_string(),
+            })
     }
 
-    pub fn load_harness_config(&self, project_id: &str) -> Result<HarnessConfig> {
-        self.storage.load_harness_config(project_id)
+    pub fn load_harness_config(&self, project_id: &str) -> AppResult<HarnessConfig> {
+        Ok(self.storage.load_harness_config(project_id)?)
     }
 
-    pub fn list_task_templates(&self) -> Result<Vec<TaskTemplate>> {
-        self.storage.load_task_templates()
+    pub fn list_task_templates(&self) -> AppResult<Vec<TaskTemplate>> {
+        Ok(self.storage.load_task_templates()?)
     }
 
     pub async fn save_harness_config(
         &self,
         project_id: &str,
         config: HarnessConfig,
-    ) -> Result<HarnessConfig> {
+    ) -> AppResult<HarnessConfig> {
         self.storage.save_harness_config(project_id, &config)?;
         *self.runtime.max_concurrency.lock().await = config.max_concurrency.max(1);
         Ok(config)
     }
 
-    pub fn create_task(&self, input: CreateTaskInput) -> Result<Task> {
-        let is_registered = self
-            .storage
-            .load_registered_projects()?
-            .into_iter()
-            .any(|project| {
-                normalize_project_path(&project.path) == normalize_project_path(&input.project_path)
-            });
-
-        if !is_registered {
-            return Err(anyhow!(
-                "project must be linked in Agent Kanban before creating tasks"
-            ));
+    pub fn create_task(&self, input: CreateTaskInput) -> AppResult<Task> {
+        if input.project_id.trim().is_empty() {
+            return Err(AppError::invalid_request("project_id is required"));
         }
 
-        git_ops::origin_remote_url(Path::new(&input.project_path))
-            .context("project must be linked to a git origin before creating tasks")?;
+        let linked_project = self.resolve_create_task_project(
+            &input.project_id,
+            input.project_path.as_deref(),
+        )?;
 
         let mut task = Task::new(
             Uuid::new_v4().to_string(),
@@ -235,7 +236,7 @@ impl AppState {
             input.cli_args,
             input.base_branch,
         );
-        task.project_path = Some(input.project_path);
+        task.project_path = Some(linked_project.path.clone());
         task.env_vars = input.env_vars;
 
         let mut tasks = self.storage.load_tasks(&input.project_id)?;
@@ -249,7 +250,7 @@ impl AppState {
         sink: impl TaskEventSink,
         project_id: String,
         task_id: String,
-    ) -> Result<()> {
+    ) -> AppResult<()> {
         let state = self.clone();
         tokio::spawn(async move {
             let _ = state.run_task(sink, project_id, task_id).await;
@@ -262,7 +263,7 @@ impl AppState {
         sink: impl TaskEventSink,
         project_id: String,
         task_id: String,
-    ) -> Result<Task> {
+    ) -> AppResult<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
         task = task.transition(TaskStatus::Executing)?;
         task.latest_error = None;
@@ -279,7 +280,7 @@ impl AppState {
         project_id: String,
         task_id: String,
         reply: String,
-    ) -> Result<Task> {
+    ) -> AppResult<Task> {
         let key = runtime_key(&project_id, &task_id);
         self.runtime.question_tokens.lock().await.remove(&key);
 
@@ -304,7 +305,7 @@ impl AppState {
         project_id: String,
         task_id: String,
         feedback: String,
-    ) -> Result<Task> {
+    ) -> AppResult<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
         task.feedback_history.push(feedback);
         task.review = None;
@@ -320,22 +321,23 @@ impl AppState {
         sink: impl TaskEventSink,
         project_id: String,
         task_id: String,
-    ) -> Result<Task> {
+    ) -> AppResult<Task> {
         let mut task = self.get_task(&project_id, &task_id)?;
         let source_path = task
             .project_path
             .clone()
-            .context("task is missing source project path")?;
+            .ok_or_else(|| AppError::internal("task is missing source project path"))?;
         let workspace_path = task
             .workspace_path
             .clone()
-            .context("task is missing workspace path")?;
+            .ok_or_else(|| AppError::internal("task is missing workspace path"))?;
         git_ops::merge_workspace_branch(
             Path::new(&source_path),
             Path::new(&workspace_path),
             &task.branch_name,
             &task.base_branch,
-        )?;
+        )
+        .map_err(|error| AppError::command_failed(error.to_string()))?;
         if let Some(message) = cleanup_workspace_after_completion(&mut task) {
             self.append_system_log(&sink, &project_id, &task.id, message)?;
         }
@@ -343,6 +345,41 @@ impl AppState {
         self.save_task(&project_id, task.clone())?;
         self.emit_task_update(&sink, &project_id, &task);
         Ok(task)
+    }
+
+    fn resolve_create_task_project(
+        &self,
+        project_id: &str,
+        project_path: Option<&str>,
+    ) -> AppResult<Project> {
+        let project = self
+            .storage
+            .load_registered_projects()?
+            .into_iter()
+            .find(|entry| entry.id == project_id)
+            .ok_or_else(|| AppError::ProjectNotLinked {
+                project_id: project_id.to_string(),
+            })?;
+
+        if let Some(received_path) = project_path.filter(|value| !value.trim().is_empty()) {
+            let expected_path = normalize_project_path(&project.path);
+            let received_path_normalized = normalize_project_path(received_path);
+            if expected_path != received_path_normalized {
+                return Err(AppError::ProjectPathMismatch {
+                    project_id: project_id.to_string(),
+                    expected_path: project.path.clone(),
+                    received_path: received_path.to_string(),
+                });
+            }
+        }
+
+        git_ops::origin_remote_url(Path::new(&project.path)).map_err(|_| {
+            AppError::ProjectMissingOriginRemote {
+                project_path: project.path.clone(),
+            }
+        })?;
+
+        Ok(project)
     }
 
     async fn run_task(
@@ -1094,6 +1131,7 @@ fn cleanup_workspace_after_completion(task: &mut Task) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::{AppError, ErrorCode};
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -1218,6 +1256,77 @@ mod tests {
 
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].name, "beta");
+
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
+    fn create_task_accepts_project_id_without_compat_project_path() {
+        let (state, root) = build_test_state();
+        let fixture = create_linked_repo_fixture(&root);
+        let project = state
+            .register_project(&fixture.source_repo)
+            .expect("register fixture project");
+
+        let task = state
+            .create_task(CreateTaskInput {
+                project_id: project.id.clone(),
+                project_path: None,
+                base_branch: project.default_branch.clone(),
+                description: "Implement project-id-only flow".into(),
+                cli_command: "node".into(),
+                cli_args: vec![fixture.agent_script.to_string_lossy().into_owned()],
+                env_vars: HashMap::new(),
+            })
+            .expect("create task without compat project path");
+
+        assert_eq!(task.project_id, project.id);
+        assert_eq!(task.project_path.as_deref(), Some(project.path.as_str()));
+
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
+    fn create_task_rejects_compat_project_path_mismatch() {
+        let (state, root) = build_test_state();
+        let fixture = create_linked_repo_fixture(&root);
+        let project = state
+            .register_project(&fixture.source_repo)
+            .expect("register fixture project");
+
+        let error = state
+            .create_task(CreateTaskInput {
+                project_id: project.id.clone(),
+                project_path: Some(root.join("other-repo").to_string_lossy().to_string()),
+                base_branch: project.default_branch.clone(),
+                description: "Reject mismatched compat path".into(),
+                cli_command: "node".into(),
+                cli_args: vec![fixture.agent_script.to_string_lossy().into_owned()],
+                env_vars: HashMap::new(),
+            })
+            .expect_err("mismatched path should fail");
+
+        assert!(matches!(error, AppError::ProjectPathMismatch { .. }));
+        assert_eq!(error.code(), ErrorCode::ProjectPathMismatch);
+
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
+    fn register_project_requires_origin_remote() {
+        let (state, root) = build_test_state();
+        let repo_root = root.join("missing-origin");
+
+        git_cmd(&root, ["init", "--initial-branch=main", repo_root.to_string_lossy().as_ref()]);
+        git_cmd(&repo_root, ["config", "user.name", "Test User"]);
+        git_cmd(&repo_root, ["config", "user.email", "test@example.com"]);
+
+        let error = state
+            .register_project(&repo_root)
+            .expect_err("registering repo without origin should fail");
+
+        assert!(matches!(error, AppError::ProjectMissingOriginRemote { .. }));
+        assert_eq!(error.code(), ErrorCode::ProjectMissingOriginRemote);
 
         fs::remove_dir_all(root).expect("remove test storage");
     }
@@ -1437,7 +1546,7 @@ mod tests {
         let answer_task = state
             .create_task(CreateTaskInput {
                 project_id: project.id.clone(),
-                project_path: project.path.clone(),
+                project_path: Some(project.path.clone()),
                 base_branch: project.default_branch.clone(),
                 description: "ANSWER FLOW - implement feature file".into(),
                 cli_command: "node".into(),
@@ -1523,7 +1632,7 @@ mod tests {
         let timeout_task = state
             .create_task(CreateTaskInput {
                 project_id: project.id.clone(),
-                project_path: project.path.clone(),
+                project_path: Some(project.path.clone()),
                 base_branch: project.default_branch.clone(),
                 description: "TIMEOUT FLOW - wait for operator forever".into(),
                 cli_command: "node".into(),

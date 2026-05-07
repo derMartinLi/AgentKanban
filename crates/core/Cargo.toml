@@ -1,0 +1,22 @@
+[package]
+name = "agentkanban-core"
+version = "0.1.0"
+description = "AgentKanban core runtime: domain models, state machine, storage, git ops, harness, and task runner"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.85"
+
+[lib]
+name = "agentkanban_core"
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+thiserror = "2.0"
+tokio = { version = "1.52", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "1.18", features = ["serde", "v4"] }

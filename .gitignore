@@ -198,6 +198,21 @@ cython_debug/
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
+
+.tmp/
+playwright-report/
+test-results/
+
+# Node / Vite / Tauri
+node_modules/
+dist/
+.vite/
+coverage/
+src-tauri/target/
+src-tauri/gen/
+
+# App-local runtime data
+.aitask/
 .cursorignore
 .cursorindexingignore
 
@@ -205,3 +220,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+*.md
+.playwright-mcp/
+.pnpm-store/

@@ -1,6 +1,19 @@
 use anyhow::{anyhow, Context, Result};
 use std::{fs, path::Path, process::Command};
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+fn configure_command(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_command(_command: &mut Command) {}
+
 pub fn current_branch(project_path: &Path) -> Result<String> {
     let output = git(project_path, ["branch", "--show-current"])?;
     let branch = output.trim();
@@ -151,7 +164,10 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let output = Command::new(program)
+    let mut command = Command::new(program);
+    configure_command(&mut command);
+
+    let output = command
         .current_dir(cwd)
         .args(args.into_iter().map(|value| value.as_ref().to_string()))
         .output()

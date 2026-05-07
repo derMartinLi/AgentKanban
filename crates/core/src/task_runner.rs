@@ -25,6 +25,17 @@ use tokio::{
 };
 use uuid::Uuid;
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+fn configure_command(command: &mut Command) {
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_command(_command: &mut Command) {}
+
 #[derive(Debug, Clone)]
 pub struct AppState {
     storage: Storage,
@@ -557,6 +568,7 @@ impl AppState {
         question_timeout_secs: u64,
     ) -> Result<bool> {
         let mut command = Command::new(&task.cli_command);
+        configure_command(&mut command);
         let invocation_args = build_cli_invocation_args(&task.cli_command, &task.cli_args, Some(&prompt));
         command
             .args(&invocation_args)
@@ -901,10 +913,14 @@ struct CommandOutput {
 
 async fn kill_process(process_id: u32) -> Result<()> {
     #[cfg(target_os = "windows")]
-    let output = Command::new("taskkill")
-        .args(["/PID", &process_id.to_string(), "/T", "/F"])
-        .output()
-        .await?;
+    let output = {
+        let mut command = Command::new("taskkill");
+        configure_command(&mut command);
+        command
+            .args(["/PID", &process_id.to_string(), "/T", "/F"])
+            .output()
+            .await?
+    };
 
     #[cfg(not(target_os = "windows"))]
     let output = Command::new("kill")
@@ -933,6 +949,7 @@ async fn run_shell_command(
     let mut command = {
         let mut cmd = Command::new("cmd");
         cmd.args(["/C", command_line]);
+        configure_command(&mut cmd);
         cmd
     };
 
@@ -968,6 +985,7 @@ async fn run_direct_command(
     prompt: Option<String>,
 ) -> Result<CommandOutput> {
     let mut command = Command::new(program);
+    configure_command(&mut command);
     let invocation_args = build_cli_invocation_args(program, args, prompt.as_deref());
     command
         .current_dir(cwd)
@@ -1020,7 +1038,11 @@ async fn command_exists(command_name: &str) -> bool {
     }
 
     #[cfg(target_os = "windows")]
-    let output = Command::new("where").arg(command_name).output().await;
+    let output = {
+        let mut command = Command::new("where");
+        configure_command(&mut command);
+        command.arg(command_name).output().await
+    };
 
     #[cfg(not(target_os = "windows"))]
     let output = Command::new("which").arg(command_name).output().await;
